@@ -22,7 +22,7 @@ CONFIG = {
     "LOCAL_FOLDER": r"C:\Program Files (x86)\Sol Sistemas\EIDICO",
     "BASE_FOLDER": r"C:\Program Files (x86)\Sol Sistemas",
     "EXE_NAME": "EidicoPrueba.exe",
-    "VPN_EXE": r"C:\Program Files\Amazon\AWS VPN Client\AWSVPNClient.exe",
+    "VPN_EXE": r"C:\Program Files\Amazon\AWS VPN Client\AWS VPN Client.exe",
     "URL_TEAMVIEWER": "https://dl.teamviewer.com/download/TeamViewerQS.exe",
     "URL_EIDICO_ZIP": "http://eidico.net/recursos/descargas/Instalar_Fox_EIDICO.zip",
     "URL_FORTICLIENT": "http://eidico.net/recursos/descargas/FortiClient_x64.zip",
@@ -199,13 +199,20 @@ def _limpiar_ruta_ejecutable_registro(valor_raw):
     return texto.split(",")[0].strip().strip('"')
 
 
+NOMBRES_EXE_VPN = ("AWS VPN Client.exe", "AWSVPNClient.exe")
+
+
 def obtener_ruta_aws_vpn():
-    """Detecta la ruta de AWSVPNClient.exe compatible con versiones modernas en Windows 10/11."""
+    """Detecta la ruta de AWS VPN Client priorizando 'AWS VPN Client.exe' en Windows 10/11."""
     candidatos = [CONFIG["VPN_EXE"]]
-    for var_entorno in ("ProgramW6432", "ProgramFiles", "ProgramFiles(x86)"):
-        base = os.environ.get(var_entorno)
-        if base:
-            candidatos.append(os.path.join(base, "Amazon", "AWS VPN Client", "AWSVPNClient.exe"))
+    for nombre_exe in NOMBRES_EXE_VPN:
+        candidatos.append(
+            os.path.join(r"C:\Program Files\Amazon\AWS VPN Client", nombre_exe)
+        )
+        for var_entorno in ("ProgramW6432", "ProgramFiles", "ProgramFiles(x86)"):
+            base = os.environ.get(var_entorno)
+            if base:
+                candidatos.append(os.path.join(base, "Amazon", "AWS VPN Client", nombre_exe))
 
     vistos = set()
     for ruta in candidatos:
@@ -230,9 +237,10 @@ def obtener_ruta_aws_vpn():
                 if exe_srv:
                     dir_srv = os.path.dirname(exe_srv)
                     for posible_dir in (dir_srv, os.path.dirname(dir_srv)):
-                        candidato = os.path.join(posible_dir, "AWSVPNClient.exe")
-                        if os.path.isfile(candidato):
-                            return candidato
+                        for nombre_exe in NOMBRES_EXE_VPN:
+                            candidato = os.path.join(posible_dir, nombre_exe)
+                            if os.path.isfile(candidato):
+                                return candidato
             except OSError:
                 continue
 
@@ -242,6 +250,7 @@ def obtener_ruta_aws_vpn():
         winreg.KEY_READ | winreg.KEY_WOW64_64KEY,
         winreg.KEY_READ | winreg.KEY_WOW64_32KEY,
     )
+    nombres_exe_lower = tuple(n.lower() for n in NOMBRES_EXE_VPN)
     for hive in (winreg.HKEY_LOCAL_MACHINE, winreg.HKEY_CURRENT_USER):
         for acceso in accesos:
             try:
@@ -260,31 +269,43 @@ def obtener_ruta_aws_vpn():
                                     except OSError:
                                         continue
                                     if campo == "InstallLocation" and val:
-                                        candidato = os.path.join(
-                                            os.path.expandvars(str(val).strip('"')),
-                                            "AWSVPNClient.exe",
-                                        )
-                                    else:
+                                        dir_inst = os.path.expandvars(str(val).strip('"'))
+                                        for nombre_exe in NOMBRES_EXE_VPN:
+                                            candidato = os.path.join(dir_inst, nombre_exe)
+                                            if os.path.isfile(candidato):
+                                                return candidato
+                                    elif val:
                                         candidato = _limpiar_ruta_ejecutable_registro(str(val))
-                                    if candidato and os.path.isfile(candidato) and candidato.lower().endswith("awsvpnclient.exe"):
-                                        return candidato
+                                        if candidato:
+                                            if (
+                                                os.path.basename(candidato).lower() in nombres_exe_lower
+                                                and os.path.isfile(candidato)
+                                            ):
+                                                return candidato
+                                            dir_icon = os.path.dirname(candidato)
+                                            if dir_icon:
+                                                for nombre_exe in NOMBRES_EXE_VPN:
+                                                    alt = os.path.join(dir_icon, nombre_exe)
+                                                    if os.path.isfile(alt):
+                                                        return alt
                         except OSError:
                             continue
             except OSError:
                 continue
 
     # 3. Consultar App Paths
-    ruta_app_paths = r"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\AWSVPNClient.exe"
-    for hive in (winreg.HKEY_LOCAL_MACHINE, winreg.HKEY_CURRENT_USER):
-        for acceso in accesos:
-            try:
-                with winreg.OpenKey(hive, ruta_app_paths, 0, acceso) as key:
-                    val, _ = winreg.QueryValueEx(key, "")
-                candidato = _limpiar_ruta_ejecutable_registro(str(val))
-                if candidato and os.path.isfile(candidato):
-                    return candidato
-            except OSError:
-                continue
+    for nombre_exe in NOMBRES_EXE_VPN:
+        ruta_app_paths = rf"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\{nombre_exe}"
+        for hive in (winreg.HKEY_LOCAL_MACHINE, winreg.HKEY_CURRENT_USER):
+            for acceso in accesos:
+                try:
+                    with winreg.OpenKey(hive, ruta_app_paths, 0, acceso) as key:
+                        val, _ = winreg.QueryValueEx(key, "")
+                    candidato = _limpiar_ruta_ejecutable_registro(str(val))
+                    if candidato and os.path.isfile(candidato):
+                        return candidato
+                except OSError:
+                    continue
 
     return None
 

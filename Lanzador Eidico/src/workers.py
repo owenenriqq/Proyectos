@@ -12,7 +12,7 @@ import zipfile
 
 from PyQt6.QtCore import QThread, pyqtSignal
 
-from config import CONFIG, get_cred, logger, obtener_ruta_aws_vpn
+from config import CONFIG, NOMBRES_EXE_VPN, get_cred, logger, obtener_ruta_aws_vpn
 
 CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
 DETACHED_PROCESS = getattr(subprocess, "DETACHED_PROCESS", 0x00000008)
@@ -414,14 +414,15 @@ class WorkerAccionSistema(QThread):
 
     def _reiniciar_vpn(self):
         logger.info("Iniciando reinicio total de AWS VPN Client y servicio VPN.")
-        subprocess.run(
-            ["taskkill", "/IM", "AWSVPNClient.exe", "/F"],
-            shell=False,
-            creationflags=CREATE_NO_WINDOW,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            check=False,
-        )
+        for nombre_exe in NOMBRES_EXE_VPN:
+            subprocess.run(
+                ["taskkill", "/IM", nombre_exe, "/F"],
+                shell=False,
+                creationflags=CREATE_NO_WINDOW,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                check=False,
+            )
 
         servicios_vpn = ("AWS.VPN.Client.Service", "AWS VPN Client OpenVPN Service")
         for servicio in servicios_vpn:

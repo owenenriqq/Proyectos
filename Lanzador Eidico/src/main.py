@@ -130,7 +130,7 @@ class GestorEidico(QWidget):
         self._anim_actual = None
 
         self.setWindowTitle("Gestor Eidico")
-        self.setFixedSize(360, 320)
+        self.setFixedSize(360, 355)
         self.setStyleSheet(ESTILO_GLOBAL)
         self.setWindowFlags(
             self.windowFlags()
@@ -164,7 +164,7 @@ class GestorEidico(QWidget):
         """Construye los paneles, botones, barra de progreso y menús de la ventana."""
         layout = QVBoxLayout(self)
         layout.setAlignment(Qt.AlignmentFlag.AlignTop)
-        layout.setSpacing(15)
+        layout.setSpacing(10)
         layout.setContentsMargins(20, 20, 20, 15)
 
         l_top = QHBoxLayout()
@@ -185,6 +185,8 @@ class GestorEidico(QWidget):
         )
         self.accion_menu_abrir_vpn = self.menu_opciones.addAction("Abrir AWS VPN Client")
         self.accion_menu_abrir_vpn.triggered.connect(self.abrir_aws_client)
+        self.accion_menu_instalar_vpn = self.menu_opciones.addAction("Instalar VPN")
+        self.accion_menu_instalar_vpn.triggered.connect(self.descargar_e_instalar_vpn)
         self.menu_opciones.aboutToShow.connect(self._actualizar_estado_acciones_vpn)
         self.menu_opciones.addSeparator()
         self.menu_opciones.addAction("Forzar cierre de Eidico").triggered.connect(
@@ -197,9 +199,8 @@ class GestorEidico(QWidget):
         self.menu_opciones.addAction("Descargar Instalador Eidico").triggered.connect(
             self.descargar_e_instalar_eidico
         )
-        self.menu_opciones.addAction("Reinstalar AWS VPN Client").triggered.connect(
-            self.reinstalar_aws
-        )
+        self.accion_menu_reinstalar_vpn = self.menu_opciones.addAction("Reinstalar AWS VPN Client")
+        self.accion_menu_reinstalar_vpn.triggered.connect(self.reinstalar_aws)
         self.menu_opciones.addAction("Descarga FortiClient").triggered.connect(
             self.descargar_forticlient
         )
@@ -233,7 +234,7 @@ class GestorEidico(QWidget):
         self.btn_opciones.setMenu(self.menu_opciones)
         l_top.addWidget(self.btn_opciones)
         layout.addLayout(l_top)
-        layout.addSpacing(15)
+        layout.addSpacing(5)
 
         self.panel_botones = QWidget()
         l_btns = QHBoxLayout(self.panel_botones)
@@ -285,14 +286,23 @@ class GestorEidico(QWidget):
             "QFrame { background-color: #ffffff; border: 1px solid #dcdde1; border-radius: 8px; }"
         )
         l_sin_vpn = QVBoxLayout(self.panel_sin_vpn)
-        l_sin_vpn.setContentsMargins(12, 12, 12, 12)
-        l_sin_vpn.setSpacing(8)
+        l_sin_vpn.setContentsMargins(14, 12, 14, 12)
+        l_sin_vpn.setSpacing(6)
 
-        self.lbl_sin_vpn_msg = QLabel()
-        self.lbl_sin_vpn_msg.setTextFormat(Qt.TextFormat.RichText)
-        self.lbl_sin_vpn_msg.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.lbl_sin_vpn_msg.setWordWrap(True)
-        l_sin_vpn.addWidget(self.lbl_sin_vpn_msg)
+        self.lbl_sin_vpn_titulo = QLabel()
+        self.lbl_sin_vpn_titulo.setTextFormat(Qt.TextFormat.RichText)
+        self.lbl_sin_vpn_titulo.setStyleSheet("font-size: 12px; font-weight: bold; color: #2d3436;")
+        self.lbl_sin_vpn_titulo.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.lbl_sin_vpn_titulo.setWordWrap(True)
+        l_sin_vpn.addWidget(self.lbl_sin_vpn_titulo)
+
+        self.lbl_sin_vpn_subtitulo = QLabel()
+        self.lbl_sin_vpn_subtitulo.setTextFormat(Qt.TextFormat.RichText)
+        self.lbl_sin_vpn_subtitulo.setStyleSheet("font-size: 11px; color: #2d3436;")
+        self.lbl_sin_vpn_subtitulo.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.lbl_sin_vpn_subtitulo.setWordWrap(True)
+        self.lbl_sin_vpn_subtitulo.setMinimumHeight(36)
+        l_sin_vpn.addWidget(self.lbl_sin_vpn_subtitulo)
 
         self.btn_sin_vpn_abrir_eidico = QPushButton("Abrir Eidico")
         self.btn_sin_vpn_abrir_eidico.setObjectName("BtnPrincipal")
@@ -306,7 +316,7 @@ class GestorEidico(QWidget):
         self.btn_sin_vpn_instructivo.setObjectName("BtnPrincipal")
         self.btn_sin_vpn_instructivo.clicked.connect(self.abrir_instructivo)
 
-        self.btn_sin_vpn_instalar = QPushButton("Instalar AWS VPN Client")
+        self.btn_sin_vpn_instalar = QPushButton("Instalar VPN")
         self.btn_sin_vpn_instalar.clicked.connect(self.descargar_e_instalar_vpn)
 
         self.btn_sin_vpn_reintentar = QPushButton("Reintentar conexión")
@@ -421,6 +431,8 @@ class GestorEidico(QWidget):
         tray_menu.addAction("Abrir Eidico").triggered.connect(self.iniciar_flujo_apertura)
         self.accion_tray_abrir_vpn = tray_menu.addAction("Abrir AWS VPN Client")
         self.accion_tray_abrir_vpn.triggered.connect(self.abrir_aws_client)
+        self.accion_tray_instalar_vpn = tray_menu.addAction("Instalar VPN")
+        self.accion_tray_instalar_vpn.triggered.connect(self.descargar_e_instalar_vpn)
         tray_menu.addAction("Forzar cierre de Eidico").triggered.connect(
             self.forzar_cierre_eidico
         )
@@ -478,15 +490,27 @@ class GestorEidico(QWidget):
             self.emitir_notificacion("Aviso", "No se pudo abrir el archivo de logs.")
 
     def _actualizar_estado_acciones_vpn(self):
-        """Muestra y habilita la opción 'Abrir AWS VPN Client' solo si está instalado."""
+        """Muestra 'Abrir/Reinstalar AWS VPN Client' o 'Instalar VPN' de forma exclusiva."""
         instalado = esta_aws_vpn_instalado()
         for accion in (
             getattr(self, "accion_menu_abrir_vpn", None),
             getattr(self, "accion_tray_abrir_vpn", None),
+            getattr(self, "accion_menu_reinstalar_vpn", None),
         ):
             if accion is not None:
                 accion.setVisible(instalado)
                 accion.setEnabled(instalado)
+
+        for accion in (
+            getattr(self, "accion_menu_instalar_vpn", None),
+            getattr(self, "accion_tray_instalar_vpn", None),
+        ):
+            if accion is not None:
+                accion.setVisible(not instalado)
+                accion.setEnabled(not instalado)
+
+        if hasattr(self, "btn_vpn_action") and not self.timer_countdown.isActive():
+            self.actualizar_boton_vpn()
 
     def abrir_aws_client(self):
         """Inicia la interfaz gráfica de AWS VPN Client de forma desacoplada si está instalada."""
@@ -812,37 +836,39 @@ class GestorEidico(QWidget):
         self.btn_sin_vpn_volver.setVisible(True)
 
         if vpn_instalado:
-            self.lbl_sin_vpn_msg.setText(
-                "<b>Sin conexión VPN con los servidores de Eidico.</b><br>"
-                "Abra <b>AWS VPN Client</b>, conéctese y luego presione <i>Abrir Eidico</i> o <i>Reintentar conexión</i>."
+            self.lbl_sin_vpn_titulo.setText("Sin conexión a la VPN de Eidico")
+            self.lbl_sin_vpn_subtitulo.setText(
+                "AWS VPN Client está instalado pero desconectado. Ábrelo y conéctate para continuar."
             )
             self.btn_sin_vpn_abrir_vpn.setVisible(True)
             self.btn_sin_vpn_instructivo.setVisible(False)
             self.btn_sin_vpn_instalar.setVisible(False)
             self.emitir_notificacion(
                 "Sin conexión VPN",
-                "Abra y conecte AWS VPN Client para acceder al sistema Eidico.",
+                "AWS VPN Client está instalado pero desconectado. Ábrelo y conéctate para continuar.",
             )
         else:
-            self.lbl_sin_vpn_msg.setText(
-                "<b>Sin conexión VPN y AWS VPN Client no detectado.</b><br>"
-                "Revise el instructivo PDF o instale <b>AWS VPN Client</b> para conectarse."
+            self.lbl_sin_vpn_titulo.setText("Sin conexión VPN ni cliente instalado")
+            self.lbl_sin_vpn_subtitulo.setText(
+                "No se detectó AWS VPN Client en este equipo. Consulta el instructivo o instálalo para conectarte."
             )
             self.btn_sin_vpn_abrir_vpn.setVisible(False)
             self.btn_sin_vpn_instructivo.setVisible(True)
             self.btn_sin_vpn_instalar.setVisible(True)
             self.emitir_notificacion(
                 "AWS VPN Client no detectado",
-                "Revise el instructivo PDF o instale AWS VPN Client para conectarse.",
+                "No se detectó AWS VPN Client. Consulta el instructivo o instálalo para conectarte.",
             )
 
         self._mostrar_panel(self.panel_sin_vpn)
 
     def _mostrar_panel_sin_vpn_reconectado(self):
         """Actualiza el panel de aviso cuando la VPN reconecta y habilita Abrir Eidico."""
-        self.lbl_sin_vpn_msg.setText(
-            "<span style='color:#27ae60;'><b>Conexión VPN detectada.</b></span><br>"
-            "Ya puede abrir el sistema Eidico."
+        self.lbl_sin_vpn_titulo.setText(
+            "<span style='color:#27ae60;'>Conexión VPN detectada</span>"
+        )
+        self.lbl_sin_vpn_subtitulo.setText(
+            "La conexión con los servidores de Eidico está activa. Ya puedes abrir el sistema."
         )
         self.btn_sin_vpn_abrir_eidico.setVisible(True)
         self.btn_sin_vpn_abrir_eidico.setEnabled(True)
