@@ -1,0 +1,4 @@
+﻿[2026-11-13 23:36:27] [INFO] Iniciando M365-Sanitizer. Registro activo en: D:\Carpetas de usuario\Proyectos\Suite-M365-Saneamiento\logs\sanitizer_20261113_233627.log
+[2026-11-13 23:36:27] [INFO] Módulo cargado correctamente: Get-OfficeDiagnostics.ps1
+[2026-11-13 23:36:27] [INFO] Módulo cargado correctamente: Clear-IdentityCache.ps1
+[2026-11-13 23:36:27] [INFO] Módulo cargado correctamente: Reset-OfficeLicenses.ps1

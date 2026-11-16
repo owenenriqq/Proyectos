@@ -1,0 +1,1 @@
+pyinstaller --noconfirm --onefile --windowed --uac-admin --name "Eidico" --add-data "Eidico.ico;." --add-data "InstructivoAWSVPN.pdf;." --icon "Eidico.ico" main.py
