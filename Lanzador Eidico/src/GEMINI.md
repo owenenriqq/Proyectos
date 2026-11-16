@@ -5,3 +5,4 @@
 - Guarda todos los archivos `.py` en codificación UTF-8.
 - Nunca borres ni modifiques `Eidico.ico`, `InstructivoAWSVPN.pdf` ni `comando.txt` sin confirmación explícita.
 - No ejecutes compilaciones ni scripts de prueba sin pedir autorización antes.
+- Al finalizar una tarea o cuando te lo pida, actualiza el archivo ESTADO.md en la raíz del proyecto (en codificación UTF-8) detallando qué se completó, qué errores siguen abiertos y cuál es el siguiente paso.
