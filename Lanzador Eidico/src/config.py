@@ -184,6 +184,116 @@ def es_admin():
         return False
 
 
+def _limpiar_ruta_ejecutable_registro(valor_raw):
+    """Extrae una ruta de ejecutable limpia desde un valor del Registro de Windows."""
+    if not valor_raw or not isinstance(valor_raw, str):
+        return ""
+    texto = os.path.expandvars(valor_raw.strip())
+    if texto.startswith('"'):
+        fin_comilla = texto.find('"', 1)
+        if fin_comilla != -1:
+            return texto[1:fin_comilla]
+    match_exe = re.match(r"^(.*?\.exe)\b", texto, re.IGNORECASE)
+    if match_exe:
+        return match_exe.group(1)
+    return texto.split(",")[0].strip().strip('"')
+
+
+def obtener_ruta_aws_vpn():
+    """Detecta la ruta de AWSVPNClient.exe compatible con versiones modernas en Windows 10/11."""
+    candidatos = [CONFIG["VPN_EXE"]]
+    for var_entorno in ("ProgramW6432", "ProgramFiles", "ProgramFiles(x86)"):
+        base = os.environ.get(var_entorno)
+        if base:
+            candidatos.append(os.path.join(base, "Amazon", "AWS VPN Client", "AWSVPNClient.exe"))
+
+    vistos = set()
+    for ruta in candidatos:
+        if not ruta:
+            continue
+        norm = os.path.normcase(os.path.abspath(ruta))
+        if norm in vistos:
+            continue
+        vistos.add(norm)
+        if os.path.isfile(ruta):
+            return ruta
+
+    # 1. Consultar servicios registrados (moderno y legado)
+    servicios = ("AWS.VPN.Client.Service", "AWS VPN Client OpenVPN Service")
+    for nombre_srv in servicios:
+        ruta_srv = rf"SYSTEM\CurrentControlSet\Services\{nombre_srv}"
+        for acceso in (winreg.KEY_READ | winreg.KEY_WOW64_64KEY, winreg.KEY_READ):
+            try:
+                with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, ruta_srv, 0, acceso) as key:
+                    image_path, _ = winreg.QueryValueEx(key, "ImagePath")
+                exe_srv = _limpiar_ruta_ejecutable_registro(image_path)
+                if exe_srv:
+                    dir_srv = os.path.dirname(exe_srv)
+                    for posible_dir in (dir_srv, os.path.dirname(dir_srv)):
+                        candidato = os.path.join(posible_dir, "AWSVPNClient.exe")
+                        if os.path.isfile(candidato):
+                            return candidato
+            except OSError:
+                continue
+
+    # 2. Consultar claves Uninstall de Windows (64 y 32 bits)
+    ruta_uninstall = r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall"
+    accesos = (
+        winreg.KEY_READ | winreg.KEY_WOW64_64KEY,
+        winreg.KEY_READ | winreg.KEY_WOW64_32KEY,
+    )
+    for hive in (winreg.HKEY_LOCAL_MACHINE, winreg.HKEY_CURRENT_USER):
+        for acceso in accesos:
+            try:
+                with winreg.OpenKey(hive, ruta_uninstall, 0, acceso) as key_uninst:
+                    total_sub = winreg.QueryInfoKey(key_uninst)[0]
+                    for idx in range(total_sub):
+                        try:
+                            sub_nombre = winreg.EnumKey(key_uninst, idx)
+                            with winreg.OpenKey(key_uninst, sub_nombre, 0, acceso) as sub_key:
+                                display_name, _ = winreg.QueryValueEx(sub_key, "DisplayName")
+                                if "aws vpn client" not in str(display_name).lower():
+                                    continue
+                                for campo in ("InstallLocation", "DisplayIcon"):
+                                    try:
+                                        val, _ = winreg.QueryValueEx(sub_key, campo)
+                                    except OSError:
+                                        continue
+                                    if campo == "InstallLocation" and val:
+                                        candidato = os.path.join(
+                                            os.path.expandvars(str(val).strip('"')),
+                                            "AWSVPNClient.exe",
+                                        )
+                                    else:
+                                        candidato = _limpiar_ruta_ejecutable_registro(str(val))
+                                    if candidato and os.path.isfile(candidato) and candidato.lower().endswith("awsvpnclient.exe"):
+                                        return candidato
+                        except OSError:
+                            continue
+            except OSError:
+                continue
+
+    # 3. Consultar App Paths
+    ruta_app_paths = r"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\AWSVPNClient.exe"
+    for hive in (winreg.HKEY_LOCAL_MACHINE, winreg.HKEY_CURRENT_USER):
+        for acceso in accesos:
+            try:
+                with winreg.OpenKey(hive, ruta_app_paths, 0, acceso) as key:
+                    val, _ = winreg.QueryValueEx(key, "")
+                candidato = _limpiar_ruta_ejecutable_registro(str(val))
+                if candidato and os.path.isfile(candidato):
+                    return candidato
+            except OSError:
+                continue
+
+    return None
+
+
+def esta_aws_vpn_instalado():
+    """Indica si AWS VPN Client está instalado en el equipo."""
+    return obtener_ruta_aws_vpn() is not None
+
+
 def limpiar_archivos_residuales():
     """Elimina archivos temporales .tmp residuales de transferencias interrumpidas."""
     local_folder = CONFIG["LOCAL_FOLDER"]

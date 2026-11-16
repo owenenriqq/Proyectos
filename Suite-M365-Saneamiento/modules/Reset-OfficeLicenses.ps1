@@ -14,6 +14,35 @@
     Soporta -WhatIf y -Confirm.
 #>
 
+function Get-OfficeInstallationPaths {
+    [CmdletBinding()]
+    param()
+
+    $regPaths = @(
+        'HKLM:\SOFTWARE\Microsoft\Office\ClickToRun\Configuration',
+        'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Office\ClickToRun\Configuration'
+    )
+
+    $paths = @()
+    foreach ($regPath in $regPaths) {
+        try {
+            if (Test-Path -LiteralPath $regPath) {
+                $props = Get-ItemProperty -LiteralPath $regPath -Name 'InstallationPath' -ErrorAction SilentlyContinue
+                if ($props -and -not [string]::IsNullOrWhiteSpace($props.InstallationPath)) {
+                    $cleanPath = $props.InstallationPath.Trim().TrimEnd('\')
+                    if ($cleanPath -and ($paths -notcontains $cleanPath)) {
+                        $paths += $cleanPath
+                    }
+                }
+            }
+        } catch {
+            # Ignorar errores de acceso puntual al registro
+        }
+    }
+
+    return $paths
+}
+
 function Get-InstalledLicenseKeys {
     [CmdletBinding()]
     param(
@@ -87,34 +116,62 @@ function Reset-OfficeLicenses {
     if (-not (Test-Path -LiteralPath $nativeSppcPath -PathType Leaf)) {
         Write-LicLog -Message "No se encontró la biblioteca nativa del sistema '$nativeSppcPath'. Se omite la eliminación de sppc.dll en rutas VFS para evitar errores de biblioteca faltante." -Level 'WARN'
     } else {
-        $sppcCandidateDirs = @(
+        $sppcCandidateDirs = @()
+        $seenDirs = @()
+        $c2rIndex = 0
+        foreach ($installPath in (Get-OfficeInstallationPaths)) {
+            $c2rIndex++
+            $dynSystem = Join-Path -Path $installPath -ChildPath 'root\vfs\System'
+            $dynSystemX86 = Join-Path -Path $installPath -ChildPath 'root\vfs\SystemX86'
+            if ($seenDirs -notcontains $dynSystem) {
+                $seenDirs += $dynSystem
+                $sppcCandidateDirs += @{ Label = "C2R${c2rIndex}_System"; Path = $dynSystem }
+            }
+            if ($seenDirs -notcontains $dynSystemX86) {
+                $seenDirs += $dynSystemX86
+                $sppcCandidateDirs += @{ Label = "C2R${c2rIndex}_SystemX86"; Path = $dynSystemX86 }
+            }
+        }
+
+        $fallbackDirs = @(
             @{ Label = 'PF64_System'; Path = "${env:ProgramFiles}\Microsoft Office\root\vfs\System" },
             @{ Label = 'PF86_SystemX86'; Path = "${env:ProgramFiles(x86)}\Microsoft Office\root\vfs\SystemX86" },
             @{ Label = 'PF86_System'; Path = "${env:ProgramFiles(x86)}\Microsoft Office\root\vfs\System" }
         )
+        foreach ($fb in $fallbackDirs) {
+            if ($fb.Path -and ($seenDirs -notcontains $fb.Path)) {
+                $seenDirs += $fb.Path
+                $sppcCandidateDirs += $fb
+            }
+        }
+
+        $sppcFileNames = @('sppc.dll', 'sppc64.dll', 'sppc32.dll')
 
         foreach ($entry in $sppcCandidateDirs) {
             if (-not $entry.Path) { continue }
-            $sppcFile = Join-Path -Path $entry.Path -ChildPath 'sppc.dll'
-            try {
-                if (Test-Path -LiteralPath $sppcFile -PathType Leaf) {
-                    if ($PSCmdlet.ShouldProcess($sppcFile, "Respaldar en '$BackupRoot' y eliminar sppc.dll")) {
-                        if (-not (Test-Path -LiteralPath $BackupRoot)) {
-                            New-Item -ItemType Directory -Path $BackupRoot -Force -ErrorAction Stop | Out-Null
+            foreach ($fileName in $sppcFileNames) {
+                $sppcFile = Join-Path -Path $entry.Path -ChildPath $fileName
+                try {
+                    if (Test-Path -LiteralPath $sppcFile -PathType Leaf) {
+                        if ($PSCmdlet.ShouldProcess($sppcFile, "Respaldar en '$BackupRoot' y eliminar $fileName")) {
+                            if (-not (Test-Path -LiteralPath $BackupRoot)) {
+                                New-Item -ItemType Directory -Path $BackupRoot -Force -ErrorAction Stop | Out-Null
+                            }
+                            $stamp = (Get-Date).ToString('yyyyMMdd_HHmmss')
+                            $baseName = [System.IO.Path]::GetFileNameWithoutExtension($fileName)
+                            $backupName = "${baseName}_$($entry.Label)_$stamp.dll"
+                            $backupDest = Join-Path -Path $BackupRoot -ChildPath $backupName
+
+                            Copy-Item -LiteralPath $sppcFile -Destination $backupDest -Force -ErrorAction Stop
+                            Write-LicLog -Message "Respaldo creado en: $backupDest" -Level 'INFO'
+
+                            Remove-Item -LiteralPath $sppcFile -Force -ErrorAction Stop
+                            Write-LicLog -Message "Archivo $fileName eliminado: $sppcFile" -Level 'INFO'
                         }
-                        $stamp = (Get-Date).ToString('yyyyMMdd_HHmmss')
-                        $backupName = "sppc_$($entry.Label)_$stamp.dll"
-                        $backupDest = Join-Path -Path $BackupRoot -ChildPath $backupName
-
-                        Copy-Item -LiteralPath $sppcFile -Destination $backupDest -Force -ErrorAction Stop
-                        Write-LicLog -Message "Respaldo creado en: $backupDest" -Level 'INFO'
-
-                        Remove-Item -LiteralPath $sppcFile -Force -ErrorAction Stop
-                        Write-LicLog -Message "Archivo sppc.dll eliminado: $sppcFile" -Level 'INFO'
                     }
+                } catch {
+                    Write-LicLog -Message "Error al respaldar/eliminar '$sppcFile': $($_.Exception.Message)" -Level 'ERROR'
                 }
-            } catch {
-                Write-LicLog -Message "Error al respaldar/eliminar '$sppcFile': $($_.Exception.Message)" -Level 'ERROR'
             }
         }
     }
@@ -122,7 +179,16 @@ function Reset-OfficeLicenses {
     # Paso 2: Consultar y remover claves mediante ospp.vbs /unpkey según el modo seleccionado
     try {
         $osppPath = $null
-        $candidatePaths = @(
+        $candidatePaths = @()
+        foreach ($installPath in (Get-OfficeInstallationPaths)) {
+            $candidatePaths += (Join-Path -Path $installPath -ChildPath 'root\Office16\ospp.vbs')
+            $candidatePaths += (Join-Path -Path $installPath -ChildPath 'Office16\ospp.vbs')
+        }
+        $candidatePaths += @(
+            "${env:ProgramFiles}\Microsoft Office\root\Office16\ospp.vbs",
+            "${env:ProgramFiles(x86)}\Microsoft Office\root\Office16\ospp.vbs",
+            "${env:ProgramFiles}\Microsoft Office\root\Office15\ospp.vbs",
+            "${env:ProgramFiles(x86)}\Microsoft Office\root\Office15\ospp.vbs",
             "${env:ProgramFiles}\Microsoft Office\Office16\ospp.vbs",
             "${env:ProgramFiles(x86)}\Microsoft Office\Office16\ospp.vbs",
             "${env:ProgramFiles}\Microsoft Office\Office15\ospp.vbs",

@@ -33,20 +33,22 @@ from config import (
     LOG_PATH,
     TIEMPO_VERIFICACION,
     es_admin,
+    esta_aws_vpn_instalado,
     get_cred,
     limpiar_archivos_residuales,
     logger,
     obtener_carpeta_descargas,
     obtener_carpeta_escritorio,
+    obtener_ruta_aws_vpn,
     resource_path,
 )
 from workers import (
-    CREATE_NO_WINDOW,
     WorkerAccionSistema,
     WorkerCheckRed,
     WorkerMonitor,
     WorkerTransferencia,
     WorkerVerificacionInicio,
+    lanzar_proceso_desacoplado,
 )
 
 if not es_admin():
@@ -143,17 +145,19 @@ class GestorEidico(QWidget):
             logger.warning("No se encontró el icono de ventana en %s", ruta_icono)
 
         self.contador_segundos = TIEMPO_VERIFICACION
+        self.ciclos_verificacion_vpn = 0
         self.timer_countdown = QTimer(self)
         self.timer_countdown.timeout.connect(self.actualizar_conteo_visible)
 
         self.configurar_bandeja_sistema()
         self.configurar_ui()
+        self._actualizar_estado_acciones_vpn()
 
         self.monitor = WorkerMonitor(CONFIG["IP_SERVER_1"], CONFIG["IP_SERVER_2"])
         self.monitor.estado_red.connect(self.actualizar_indicador_red)
         self.monitor.start()
 
-        self.vista_trabajando(True, indeterminado=True, mensaje_barra="Iniciando Gestor...")
+        self.vista_trabajando(True, indeterminado=True, mensaje_barra="Iniciando Eidico...")
         QTimer.singleShot(2000, self.iniciar_flujo_apertura)
 
     def configurar_ui(self):
@@ -179,6 +183,9 @@ class GestorEidico(QWidget):
         self.menu_opciones.addAction("Como configurar mi usuario a AWS (PDF)").triggered.connect(
             self.abrir_instructivo
         )
+        self.accion_menu_abrir_vpn = self.menu_opciones.addAction("Abrir AWS VPN Client")
+        self.accion_menu_abrir_vpn.triggered.connect(self.abrir_aws_client)
+        self.menu_opciones.aboutToShow.connect(self._actualizar_estado_acciones_vpn)
         self.menu_opciones.addSeparator()
         self.menu_opciones.addAction("Forzar cierre de Eidico").triggered.connect(
             self.forzar_cierre_eidico
@@ -273,10 +280,53 @@ class GestorEidico(QWidget):
         l_asis.addSpacing(10)
         l_asis.addWidget(b_volver)
 
+        self.panel_sin_vpn = QFrame()
+        self.panel_sin_vpn.setStyleSheet(
+            "QFrame { background-color: #ffffff; border: 1px solid #dcdde1; border-radius: 8px; }"
+        )
+        l_sin_vpn = QVBoxLayout(self.panel_sin_vpn)
+        l_sin_vpn.setContentsMargins(12, 12, 12, 12)
+        l_sin_vpn.setSpacing(8)
+
+        self.lbl_sin_vpn_msg = QLabel()
+        self.lbl_sin_vpn_msg.setTextFormat(Qt.TextFormat.RichText)
+        self.lbl_sin_vpn_msg.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.lbl_sin_vpn_msg.setWordWrap(True)
+        l_sin_vpn.addWidget(self.lbl_sin_vpn_msg)
+
+        self.btn_sin_vpn_abrir_eidico = QPushButton("Abrir Eidico")
+        self.btn_sin_vpn_abrir_eidico.setObjectName("BtnPrincipal")
+        self.btn_sin_vpn_abrir_eidico.clicked.connect(self.iniciar_flujo_apertura)
+
+        self.btn_sin_vpn_abrir_vpn = QPushButton("Abrir AWS VPN Client")
+        self.btn_sin_vpn_abrir_vpn.setObjectName("BtnPrincipal")
+        self.btn_sin_vpn_abrir_vpn.clicked.connect(self.abrir_aws_client)
+
+        self.btn_sin_vpn_instructivo = QPushButton("Ver instructivo AWS VPN (PDF)")
+        self.btn_sin_vpn_instructivo.setObjectName("BtnPrincipal")
+        self.btn_sin_vpn_instructivo.clicked.connect(self.abrir_instructivo)
+
+        self.btn_sin_vpn_instalar = QPushButton("Instalar AWS VPN Client")
+        self.btn_sin_vpn_instalar.clicked.connect(self.descargar_e_instalar_vpn)
+
+        self.btn_sin_vpn_reintentar = QPushButton("Reintentar conexión")
+        self.btn_sin_vpn_reintentar.clicked.connect(self.iniciar_flujo_apertura)
+
+        self.btn_sin_vpn_volver = QPushButton("Volver al Inicio")
+        self.btn_sin_vpn_volver.clicked.connect(self.restaurar_menu_principal)
+
+        l_sin_vpn.addWidget(self.btn_sin_vpn_abrir_eidico)
+        l_sin_vpn.addWidget(self.btn_sin_vpn_abrir_vpn)
+        l_sin_vpn.addWidget(self.btn_sin_vpn_instructivo)
+        l_sin_vpn.addWidget(self.btn_sin_vpn_instalar)
+        l_sin_vpn.addWidget(self.btn_sin_vpn_reintentar)
+        l_sin_vpn.addWidget(self.btn_sin_vpn_volver)
+
         self.stack = QStackedWidget()
         self.stack.addWidget(self.panel_botones)
         self.stack.addWidget(self.panel_progreso)
         self.stack.addWidget(self.panel_asistente)
+        self.stack.addWidget(self.panel_sin_vpn)
         layout.addWidget(self.stack)
 
         layout.addStretch()
@@ -334,6 +384,7 @@ class GestorEidico(QWidget):
 
     def vista_trabajando(self, ocupado, indeterminado=False, mensaje_barra=""):
         """Muestra la barra de progreso o vuelve al panel de botones principales."""
+        self.btn_opciones.setEnabled(not ocupado)
         if ocupado:
             if indeterminado:
                 self.pbar.setRange(0, 0)
@@ -358,6 +409,7 @@ class GestorEidico(QWidget):
     def configurar_bandeja_sistema(self):
         """Inicializa el ícono y menú contextual en la bandeja del sistema."""
         self.tray_icon = QSystemTrayIcon(self)
+        self.tray_icon.setToolTip("Eidico")
         ruta_icono = resource_path("Eidico.ico")
         if os.path.exists(ruta_icono):
             self.tray_icon.setIcon(QIcon(ruta_icono))
@@ -367,12 +419,14 @@ class GestorEidico(QWidget):
 
         tray_menu.addAction("Abrir").triggered.connect(self.showNormal)
         tray_menu.addAction("Abrir Eidico").triggered.connect(self.iniciar_flujo_apertura)
-        tray_menu.addAction("Abrir AWS VPN Client").triggered.connect(self.abrir_aws_client)
+        self.accion_tray_abrir_vpn = tray_menu.addAction("Abrir AWS VPN Client")
+        self.accion_tray_abrir_vpn.triggered.connect(self.abrir_aws_client)
         tray_menu.addAction("Forzar cierre de Eidico").triggered.connect(
             self.forzar_cierre_eidico
         )
         tray_menu.addSeparator()
         tray_menu.addAction("Cerrar").triggered.connect(self.cerrar_aplicacion_total)
+        tray_menu.aboutToShow.connect(self._actualizar_estado_acciones_vpn)
 
         self.tray_icon.setContextMenu(tray_menu)
         self.tray_icon.activated.connect(self.al_hacer_click_tray)
@@ -423,16 +477,29 @@ class GestorEidico(QWidget):
             logger.exception("No se pudo abrir el archivo de logs en %s", LOG_PATH)
             self.emitir_notificacion("Aviso", "No se pudo abrir el archivo de logs.")
 
+    def _actualizar_estado_acciones_vpn(self):
+        """Muestra y habilita la opción 'Abrir AWS VPN Client' solo si está instalado."""
+        instalado = esta_aws_vpn_instalado()
+        for accion in (
+            getattr(self, "accion_menu_abrir_vpn", None),
+            getattr(self, "accion_tray_abrir_vpn", None),
+        ):
+            if accion is not None:
+                accion.setVisible(instalado)
+                accion.setEnabled(instalado)
+
     def abrir_aws_client(self):
-        """Inicia la interfaz gráfica de AWS VPN Client si está instalada."""
-        if os.path.exists(CONFIG["VPN_EXE"]):
+        """Inicia la interfaz gráfica de AWS VPN Client de forma desacoplada si está instalada."""
+        ruta_vpn = obtener_ruta_aws_vpn()
+        if ruta_vpn:
             try:
-                subprocess.Popen([CONFIG["VPN_EXE"]], shell=False)
+                lanzar_proceso_desacoplado(ruta_vpn)
+                logger.info("AWS VPN Client iniciado desde %s", ruta_vpn)
             except OSError:
-                logger.exception("Error al abrir AWS VPN Client")
+                logger.exception("Error al abrir AWS VPN Client en %s", ruta_vpn)
                 self.emitir_notificacion("Aviso", "No se pudo abrir AWS VPN Client.")
         else:
-            self.emitir_notificacion("Aviso", "AWS VPN Client no encontrado.")
+            self.emitir_notificacion("Aviso", "AWS VPN Client no encontrado en el equipo.")
 
     def limpiar_sesion_red(self):
         """Limpia en segundo plano las sesiones SMB de Eidico y la caché DNS."""
@@ -447,30 +514,21 @@ class GestorEidico(QWidget):
         self.worker_accion.start()
 
     def forzar_cierre_eidico(self):
-        """Fuerza la finalización del proceso local EidicoPrueba.exe."""
+        """Fuerza en segundo plano la finalización del proceso local EidicoPrueba.exe."""
+        if self._hay_tarea_en_curso():
+            self.emitir_notificacion("Aviso", "Hay una operación en curso. Aguarde un momento.")
+            return
         self.vista_trabajando(True, indeterminado=True, mensaje_barra="Cerrando procesos...")
-        try:
-            subprocess.run(
-                ["taskkill", "/IM", CONFIG["EXE_NAME"], "/F"],
-                shell=False,
-                creationflags=CREATE_NO_WINDOW,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                check=False,
-            )
-            logger.info("Se solicitó cierre forzado de %s.", CONFIG["EXE_NAME"])
-            self.emitir_notificacion("Gestor Eidico", "Eidico cerrado correctamente.")
-        except OSError:
-            logger.exception("No se pudo forzar el cierre de %s", CONFIG["EXE_NAME"])
-            self.emitir_notificacion("Aviso", "No se pudo cerrar Eidico.")
-        QTimer.singleShot(1500, self.restaurar_menu_principal)
+        self.worker_accion = WorkerAccionSistema("forzar_cierre_eidico")
+        self.worker_accion.finalizado.connect(self._fin_accion_sistema)
+        self.worker_accion.start()
 
     def reiniciar_vpn_total(self):
         """Reinicia el cliente y el servicio de AWS VPN en segundo plano."""
         if self._hay_tarea_en_curso():
             self.emitir_notificacion("Aviso", "Hay una operación en curso. Aguarde un momento.")
             return
-        self.emitir_notificacion("Gestor Eidico", "Reiniciando servicios VPN...")
+        self.emitir_notificacion("Eidico", "Reiniciando servicios VPN...")
         self.vista_trabajando(True, indeterminado=True, mensaje_barra="Reiniciando AWS VPN...")
         self.worker_accion = WorkerAccionSistema("reiniciar_vpn")
         self.worker_accion.finalizado.connect(self._fin_accion_sistema)
@@ -479,14 +537,14 @@ class GestorEidico(QWidget):
     def _fin_accion_sistema(self, exito, mensaje):
         """Notifica el resultado de una acción de sistema ejecutada en segundo plano."""
         if exito:
-            self.emitir_notificacion("Gestor Eidico", mensaje)
+            self.emitir_notificacion("Eidico", mensaje)
         else:
             self.emitir_notificacion("Aviso", f"No se pudo completar la operación: {mensaje}")
         QTimer.singleShot(1200, self.restaurar_menu_principal)
 
     def forzar_actualizacion_eidico(self):
         """Descarga y reemplaza EidicoPrueba.exe desde la carpeta compartida del servidor."""
-        self.emitir_notificacion("Gestor Eidico", "Iniciando reparacion de archivos.")
+        self.emitir_notificacion("Eidico", "Iniciando reparacion de archivos.")
         self.iniciar_descarga(
             "",
             is_url=False,
@@ -496,7 +554,7 @@ class GestorEidico(QWidget):
         )
 
     def actualizar_indicador_red(self, on_146, on_13):
-        """Actualiza las etiquetas de estado de conectividad hacia ambos servidores."""
+        """Actualiza las etiquetas de estado de conectividad y reacciona si la VPN reconecta."""
         c_146 = "#27ae60" if on_146 else "#e74c3c"
         c_13 = "#27ae60" if on_13 else "#e74c3c"
         t_146 = f"Conectado {CONFIG['IP_SERVER_1']}" if on_146 else f"Desconectado {CONFIG['IP_SERVER_1']}"
@@ -506,9 +564,12 @@ class GestorEidico(QWidget):
             f"<span style='color:{c_13};'>{t_13}</span></div>"
         )
 
+        if self.stack.currentWidget() is self.panel_sin_vpn and on_146:
+            self._mostrar_panel_sin_vpn_reconectado()
+
     def solicitar_soporte_tv(self):
         """Descarga TeamViewer QuickSupport y muestra las opciones de contacto IT."""
-        self.emitir_notificacion("Gestor Eidico", "Descargando modulo de soporte tecnico...")
+        self.emitir_notificacion("Eidico", "Descargando modulo de soporte tecnico...")
         self.iniciar_descarga(
             "",
             is_url=True,
@@ -532,7 +593,7 @@ class GestorEidico(QWidget):
 
     def descargar_e_instalar_eidico(self):
         """Descarga el paquete ZIP del instalador de Eidico."""
-        self.emitir_notificacion("Gestor Eidico", "Iniciando descarga del instalador de Eidico.")
+        self.emitir_notificacion("Eidico", "Iniciando descarga del instalador de Eidico.")
         self.iniciar_descarga(
             "",
             is_url=True,
@@ -560,7 +621,7 @@ class GestorEidico(QWidget):
         if exito:
             try:
                 os.startfile(destino_abrir)
-                self.emitir_notificacion("Gestor Eidico", "Instalador de Eidico preparado.")
+                self.emitir_notificacion("Eidico", "Instalador de Eidico preparado.")
             except OSError:
                 logger.exception("No se pudo abrir el instalador extraído en %s", destino_abrir)
                 self.emitir_notificacion("Aviso", "Fallo al abrir el instalador extraído.")
@@ -570,7 +631,7 @@ class GestorEidico(QWidget):
 
     def descargar_forticlient(self):
         """Descarga el instalador de FortiClient."""
-        self.emitir_notificacion("Gestor Eidico", "Iniciando descarga de FortiClient.")
+        self.emitir_notificacion("Eidico", "Iniciando descarga de FortiClient.")
         self.iniciar_descarga(
             "",
             is_url=True,
@@ -581,7 +642,7 @@ class GestorEidico(QWidget):
 
     def reinstalar_aws(self):
         """Descarga el instalador MSI de AWS VPN Client para reinstalación."""
-        self.emitir_notificacion("Gestor Eidico", "Iniciando descarga de AWS VPN Client.")
+        self.emitir_notificacion("Eidico", "Iniciando descarga de AWS VPN Client.")
         self.iniciar_descarga(
             "",
             is_url=True,
@@ -592,7 +653,7 @@ class GestorEidico(QWidget):
 
     def descargar_e_instalar_vpn(self):
         """Descarga e instala AWS VPN Client cuando no se encuentra en el equipo."""
-        self.emitir_notificacion("Gestor Eidico", "Iniciando descarga de AWS VPN Client.")
+        self.emitir_notificacion("Eidico", "Iniciando descarga de AWS VPN Client.")
         self.iniciar_descarga(
             "",
             is_url=True,
@@ -631,11 +692,11 @@ class GestorEidico(QWidget):
         self.restaurar_menu_principal()
 
     def agregar_credencial_y_abrir(self, ip, user, pass_b64, path, timeout, msg_exito):
-        """Inyecta la credencial SMB en segundo plano y abre la carpeta compartida."""
+        """Inyecta la credencial SMB en segundo plano y verifica conectividad sin abrir carpetas."""
         if self._hay_tarea_en_curso():
             self.emitir_notificacion("Aviso", "Hay una operación en curso. Aguarde un momento.")
             return
-        self.emitir_notificacion("Gestor Eidico", f"Inyectando credenciales para {ip}...")
+        self.emitir_notificacion("Eidico", f"Inyectando credenciales para {ip}...")
         self.vista_trabajando(True, indeterminado=True, mensaje_barra=f"Conectando a {ip}...")
         password = get_cred(pass_b64)
         self.worker_red = WorkerCheckRed(
@@ -645,58 +706,26 @@ class GestorEidico(QWidget):
         self.worker_red.start()
 
     def fin_check_red(self, exito, msj, path):
-        """Abre la ruta de red verificada o informa el error de conectividad."""
+        """Informa el resultado de la verificación de credencial y conectividad."""
         if exito:
-            self.emitir_notificacion("Gestor Eidico", msj)
-            try:
-                os.startfile(path)
-            except OSError:
-                logger.exception("No se pudo abrir el recurso de red %s", path)
-                self.emitir_notificacion("Aviso", "No se pudo abrir la carpeta de red.")
+            self.emitir_notificacion("Eidico", msj)
         else:
             self.emitir_notificacion("Aviso", msj)
         self.restaurar_menu_principal()
 
     def crear_accesos_directos(self):
-        """Crea accesos directos en el Escritorio pasando rutas de forma segura por entorno."""
+        """Crea en segundo plano los accesos directos en el Escritorio."""
+        if self._hay_tarea_en_curso():
+            self.emitir_notificacion("Aviso", "Hay una operación en curso. Aguarde un momento.")
+            return
         self.vista_trabajando(
             True, indeterminado=True, mensaje_barra="Creando accesos directos..."
         )
-        escritorio = obtener_carpeta_escritorio()
-        lnk_1 = os.path.join(escritorio, f"Fileserver ({CONFIG['IP_SERVER_1']}).lnk")
-        lnk_2 = os.path.join(escritorio, "FILESERVER.lnk")
-        target_1 = rf"\\{CONFIG['IP_SERVER_1']}\Fileserver"
-        target_2 = rf"\\{CONFIG['IP_SERVER_2']}"
-
-        ps_cmd = (
-            "$ws = New-Object -ComObject WScript.Shell; "
-            "$s1 = $ws.CreateShortcut($env:EIDICO_LNK_1); "
-            "$s1.TargetPath = $env:EIDICO_TARGET_1; "
-            "$s1.Save(); "
-            "$s2 = $ws.CreateShortcut($env:EIDICO_LNK_2); "
-            "$s2.TargetPath = $env:EIDICO_TARGET_2; "
-            "$s2.Save()"
+        self.worker_accion = WorkerAccionSistema(
+            "crear_accesos_directos", escritorio=obtener_carpeta_escritorio()
         )
-        env = os.environ.copy()
-        env["EIDICO_LNK_1"] = lnk_1
-        env["EIDICO_TARGET_1"] = target_1
-        env["EIDICO_LNK_2"] = lnk_2
-        env["EIDICO_TARGET_2"] = target_2
-
-        try:
-            subprocess.run(
-                ["powershell", "-NoProfile", "-Command", ps_cmd],
-                env=env,
-                shell=False,
-                creationflags=CREATE_NO_WINDOW,
-                check=True,
-            )
-            logger.info("Accesos directos creados en %s", escritorio)
-            self.emitir_notificacion("Gestor Eidico", "Accesos directos creados en su escritorio.")
-        except (OSError, subprocess.SubprocessError):
-            logger.exception("No se pudieron crear los accesos directos en %s", escritorio)
-            self.emitir_notificacion("Aviso", "No se pudieron crear los accesos directos.")
-        QTimer.singleShot(1500, self.restaurar_menu_principal)
+        self.worker_accion.finalizado.connect(self._fin_accion_sistema)
+        self.worker_accion.start()
 
     def actualizar_boton_vpn(self):
         """Ajusta el texto y la acción del botón VPN según si AWS VPN está instalado."""
@@ -704,7 +733,7 @@ class GestorEidico(QWidget):
             self.btn_vpn_action.clicked.disconnect()
         except TypeError:
             pass
-        if os.path.exists(CONFIG["VPN_EXE"]):
+        if esta_aws_vpn_instalado():
             self.btn_vpn_action.setText("Reiniciar VPN")
             self.btn_vpn_action.clicked.connect(self.reiniciar_vpn_total)
         else:
@@ -718,18 +747,32 @@ class GestorEidico(QWidget):
         self.btn_vpn_action.setVisible(True)
         self.btn_vpn_action.setEnabled(False)
         self.contador_segundos = TIEMPO_VERIFICACION
+        self.ciclos_verificacion_vpn = 0
         self.timer_countdown.start(1000)
 
     def actualizar_conteo_visible(self):
         """Actualiza el contador regresivo y verifica si finalizó la instalación VPN."""
+        if esta_aws_vpn_instalado():
+            self.timer_countdown.stop()
+            self.emitir_notificacion("Eidico", "Instalacion de AWS VPN detectada.")
+            self.btn_eidico.setVisible(True)
+            self.btn_vpn_action.setEnabled(True)
+            self._actualizar_estado_acciones_vpn()
+            self.restaurar_menu_principal()
+            return
+
         self.contador_segundos -= 1
         self.btn_vpn_action.setText(f"Verificando VPN ({self.contador_segundos}s)")
         if self.contador_segundos <= 0:
-            if os.path.exists(CONFIG["VPN_EXE"]):
+            self.ciclos_verificacion_vpn += 1
+            if self.ciclos_verificacion_vpn >= 3:
                 self.timer_countdown.stop()
-                self.emitir_notificacion("Gestor Eidico", "Instalacion de AWS VPN detectada.")
                 self.btn_eidico.setVisible(True)
                 self.btn_vpn_action.setEnabled(True)
+                self.emitir_notificacion(
+                    "Aviso",
+                    "No se detectó la instalación de AWS VPN Client. Puede reintentar cuando finalice.",
+                )
                 self.restaurar_menu_principal()
             else:
                 self.contador_segundos = TIEMPO_VERIFICACION
@@ -760,23 +803,53 @@ class GestorEidico(QWidget):
             self.manejar_modo_offline()
 
     def manejar_modo_offline(self):
-        """Inicia AWS VPN Client si existe y abre la copia local de Eidico."""
-        self.emitir_notificacion("Gestor Eidico", "Iniciando AWS VPN Client de forma automatica.")
-        if os.path.exists(CONFIG["VPN_EXE"]):
-            try:
-                subprocess.Popen([CONFIG["VPN_EXE"]], shell=False)
-            except OSError:
-                logger.exception("No se pudo iniciar AWS VPN Client en modo offline")
+        """Muestra un aviso claro sin abrir AWS VPN Client ni Eidico automáticamente."""
+        vpn_instalado = esta_aws_vpn_instalado()
+        self.btn_opciones.setEnabled(True)
+        self.btn_sin_vpn_abrir_eidico.setVisible(False)
+        self.btn_sin_vpn_abrir_eidico.setEnabled(False)
+        self.btn_sin_vpn_reintentar.setVisible(True)
+        self.btn_sin_vpn_volver.setVisible(True)
 
-        local_exe = os.path.join(CONFIG["LOCAL_FOLDER"], CONFIG["EXE_NAME"])
-        if not os.path.exists(local_exe):
-            logger.warning("Ejecutable local no encontrado en %s", local_exe)
-            self.emitir_notificacion("Aviso", "Archivos de sistema no encontrados localmente.")
-            QTimer.singleShot(2500, self.restaurar_menu_principal)
-            return
+        if vpn_instalado:
+            self.lbl_sin_vpn_msg.setText(
+                "<b>Sin conexión VPN con los servidores de Eidico.</b><br>"
+                "Abra <b>AWS VPN Client</b>, conéctese y luego presione <i>Abrir Eidico</i> o <i>Reintentar conexión</i>."
+            )
+            self.btn_sin_vpn_abrir_vpn.setVisible(True)
+            self.btn_sin_vpn_instructivo.setVisible(False)
+            self.btn_sin_vpn_instalar.setVisible(False)
+            self.emitir_notificacion(
+                "Sin conexión VPN",
+                "Abra y conecte AWS VPN Client para acceder al sistema Eidico.",
+            )
+        else:
+            self.lbl_sin_vpn_msg.setText(
+                "<b>Sin conexión VPN y AWS VPN Client no detectado.</b><br>"
+                "Revise el instructivo PDF o instale <b>AWS VPN Client</b> para conectarse."
+            )
+            self.btn_sin_vpn_abrir_vpn.setVisible(False)
+            self.btn_sin_vpn_instructivo.setVisible(True)
+            self.btn_sin_vpn_instalar.setVisible(True)
+            self.emitir_notificacion(
+                "AWS VPN Client no detectado",
+                "Revise el instructivo PDF o instale AWS VPN Client para conectarse.",
+            )
 
-        self.emitir_notificacion("Gestor Eidico", "Preparando inicio en modo local.")
-        QTimer.singleShot(1000, self.lanzar_eidico)
+        self._mostrar_panel(self.panel_sin_vpn)
+
+    def _mostrar_panel_sin_vpn_reconectado(self):
+        """Actualiza el panel de aviso cuando la VPN reconecta y habilita Abrir Eidico."""
+        self.lbl_sin_vpn_msg.setText(
+            "<span style='color:#27ae60;'><b>Conexión VPN detectada.</b></span><br>"
+            "Ya puede abrir el sistema Eidico."
+        )
+        self.btn_sin_vpn_abrir_eidico.setVisible(True)
+        self.btn_sin_vpn_abrir_eidico.setEnabled(True)
+        self.btn_sin_vpn_abrir_vpn.setVisible(False)
+        self.btn_sin_vpn_instructivo.setVisible(False)
+        self.btn_sin_vpn_instalar.setVisible(False)
+        self.btn_sin_vpn_reintentar.setVisible(False)
 
     def iniciar_logica_online(self, necesita_act):
         """Actualiza el ejecutable desde el servidor si hace falta o lo inicia directamente."""
@@ -789,13 +862,13 @@ class GestorEidico(QWidget):
                 fin_callback=self.fin_proceso_actualizacion,
             )
         else:
-            self.emitir_notificacion("Gestor Eidico", "Iniciando sistema de gestion...")
+            self.emitir_notificacion("Eidico", "Iniciando Eidico...")
             QTimer.singleShot(1000, self.lanzar_eidico)
 
     def iniciar_descarga(self, titulo, is_url=True, src="", nombre="", fin_callback=None):
         """Prepara y ejecuta WorkerTransferencia evitando ejecuciones concurrentes."""
-        if self.worker is not None and self.worker.isRunning():
-            self.emitir_notificacion("Aviso", "Ya hay una transferencia en curso.")
+        if self._hay_tarea_en_curso():
+            self.emitir_notificacion("Aviso", "Hay una operación en curso. Aguarde un momento.")
             return
 
         self.vista_trabajando(True, mensaje_barra="Preparando transferencia...")
@@ -820,11 +893,11 @@ class GestorEidico(QWidget):
     def fin_proceso_actualizacion(self, exito, error):
         """Lanza Eidico tras una actualización exitosa o informa el fallo."""
         if exito:
-            self.emitir_notificacion("Gestor Eidico", "Sistema local actualizado exitosamente.")
+            self.emitir_notificacion("Eidico", "Eidico actualizado exitosamente.")
             QTimer.singleShot(1000, self.lanzar_eidico)
         else:
             logger.error("Fallo la actualización de Eidico: %s", error)
-            self.emitir_notificacion("Aviso", "No se pudo actualizar el sistema de gestion.")
+            self.emitir_notificacion("Aviso", "No se pudo actualizar Eidico.")
             self.restaurar_menu_principal()
 
     def lanzar_eidico(self):
@@ -878,6 +951,8 @@ class GestorEidico(QWidget):
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
+    app.setApplicationName("Eidico")
+    app.setApplicationDisplayName("Eidico")
     shared_mem = QSharedMemory("Gestor_Eidico_Lock_2026")
     if not shared_mem.create(1):
         sys.exit(0)

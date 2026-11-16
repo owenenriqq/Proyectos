@@ -9,11 +9,53 @@
     y almacenamiento de licenciamiento vNext.
 #>
 
+function Get-OfficeInstallationPaths {
+    [CmdletBinding()]
+    param()
+
+    $regPaths = @(
+        'HKLM:\SOFTWARE\Microsoft\Office\ClickToRun\Configuration',
+        'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Office\ClickToRun\Configuration'
+    )
+
+    $paths = @()
+    foreach ($regPath in $regPaths) {
+        try {
+            if (Test-Path -LiteralPath $regPath) {
+                $props = Get-ItemProperty -LiteralPath $regPath -Name 'InstallationPath' -ErrorAction SilentlyContinue
+                if ($props -and -not [string]::IsNullOrWhiteSpace($props.InstallationPath)) {
+                    $cleanPath = $props.InstallationPath.Trim().TrimEnd('\')
+                    if ($cleanPath -and ($paths -notcontains $cleanPath)) {
+                        $paths += $cleanPath
+                    }
+                }
+            }
+        } catch {
+            # Ignorar errores de acceso puntual al registro
+        }
+    }
+
+    return $paths
+}
+
 function Get-OsppPath {
     [CmdletBinding()]
     param()
 
-    $candidatePaths = @(
+    $candidatePaths = @()
+
+    # Rutas dinámicas desde Click-to-Run InstallationPath
+    foreach ($installPath in (Get-OfficeInstallationPaths)) {
+        $candidatePaths += (Join-Path -Path $installPath -ChildPath 'root\Office16\ospp.vbs')
+        $candidatePaths += (Join-Path -Path $installPath -ChildPath 'Office16\ospp.vbs')
+    }
+
+    # Rutas estándar de respaldo en Program Files y Program Files (x86)
+    $candidatePaths += @(
+        "${env:ProgramFiles}\Microsoft Office\root\Office16\ospp.vbs",
+        "${env:ProgramFiles(x86)}\Microsoft Office\root\Office16\ospp.vbs",
+        "${env:ProgramFiles}\Microsoft Office\root\Office15\ospp.vbs",
+        "${env:ProgramFiles(x86)}\Microsoft Office\root\Office15\ospp.vbs",
         "${env:ProgramFiles}\Microsoft Office\Office16\ospp.vbs",
         "${env:ProgramFiles(x86)}\Microsoft Office\Office16\ospp.vbs",
         "${env:ProgramFiles}\Microsoft Office\Office15\ospp.vbs",
@@ -135,6 +177,7 @@ function Get-OfficeDiagnostics {
         ClickToRun         = $null
         MsiInstallations   = @()
         SppcHooks          = @()
+        IfeoRedirections   = @()
         ParsedLicenses     = @()
         OsppStatusRaw      = $null
         IdentityCaches     = @()
@@ -188,38 +231,75 @@ function Get-OfficeDiagnostics {
         Write-DiagLog -Message "Error al consultar instalaciones MSI: $($_.Exception.Message)" -Level 'ERROR'
     }
 
-    # 3. Detección de archivos sppc.dll inyectados o modificados (indicador de parche Ohook)
-    $sppcCandidateDirs = @(
+    # 3. Detección de archivos sppc.dll (y variantes Ohook) inyectados o modificados
+    $sppcCandidateDirs = @()
+    foreach ($installPath in (Get-OfficeInstallationPaths)) {
+        $sppcCandidateDirs += (Join-Path -Path $installPath -ChildPath 'root\vfs\System')
+        $sppcCandidateDirs += (Join-Path -Path $installPath -ChildPath 'root\vfs\SystemX86')
+    }
+    $sppcCandidateDirs += @(
         "${env:ProgramFiles}\Microsoft Office\root\vfs\System",
         "${env:ProgramFiles(x86)}\Microsoft Office\root\vfs\SystemX86",
         "${env:ProgramFiles(x86)}\Microsoft Office\root\vfs\System"
     )
+    $sppcCandidateDirs = @($sppcCandidateDirs | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Unique)
+    $sppcFileNames = @('sppc.dll', 'sppc64.dll', 'sppc32.dll')
 
     foreach ($dir in $sppcCandidateDirs) {
-        if (-not $dir) { continue }
-        $sppcFile = Join-Path -Path $dir -ChildPath 'sppc.dll'
-        try {
-            if (Test-Path -LiteralPath $sppcFile -PathType Leaf) {
-                $fileInfo = Get-Item -LiteralPath $sppcFile -ErrorAction Stop
-                $sig = Get-AuthenticodeSignature -LiteralPath $sppcFile -ErrorAction SilentlyContinue
-                $sigStatus = if ($sig) { $sig.Status.ToString() } else { 'Desconocido' }
+        foreach ($fileName in $sppcFileNames) {
+            $sppcFile = Join-Path -Path $dir -ChildPath $fileName
+            try {
+                if (Test-Path -LiteralPath $sppcFile -PathType Leaf) {
+                    $fileInfo = Get-Item -LiteralPath $sppcFile -ErrorAction Stop
+                    $sig = Get-AuthenticodeSignature -LiteralPath $sppcFile -ErrorAction SilentlyContinue
+                    $sigStatus = if ($sig) { $sig.Status.ToString() } else { 'Desconocido' }
 
-                $hookInfo = [PSCustomObject]@{
-                    Path            = $sppcFile
-                    LengthBytes     = $fileInfo.Length
-                    LastWriteTime   = $fileInfo.LastWriteTime
-                    SignatureStatus = $sigStatus
+                    $hookInfo = [PSCustomObject]@{
+                        Path            = $sppcFile
+                        LengthBytes     = $fileInfo.Length
+                        LastWriteTime   = $fileInfo.LastWriteTime
+                        SignatureStatus = $sigStatus
+                    }
+                    $diagnostics.SppcHooks += $hookInfo
+                    Write-DiagLog -Message "ALERTA: Archivo $fileName detectado (posible parche Ohook): $sppcFile | Tamaño: $($fileInfo.Length) bytes | Firma: $sigStatus" -Level 'WARN'
                 }
-                $diagnostics.SppcHooks += $hookInfo
-                Write-DiagLog -Message "ALERTA: Archivo sppc.dll detectado (posible parche Ohook): $sppcFile | Tamaño: $($fileInfo.Length) bytes | Firma: $sigStatus" -Level 'WARN'
+            } catch {
+                Write-DiagLog -Message "Error al inspeccionar '$sppcFile': $($_.Exception.Message)" -Level 'ERROR'
             }
-        } catch {
-            Write-DiagLog -Message "Error al inspeccionar '$sppcFile': $($_.Exception.Message)" -Level 'ERROR'
         }
     }
 
     if ($diagnostics.SppcHooks.Count -eq 0) {
-        Write-DiagLog -Message 'No se detectaron archivos sppc.dll en rutas VFS de Office.' -Level 'INFO'
+        Write-DiagLog -Message 'No se detectaron archivos sppc.dll/sppc64.dll/sppc32.dll en rutas VFS de Office.' -Level 'INFO'
+    }
+
+    # 3b. Verificación de claves de redirección de depuración (IFEO) para osppsvc.exe y sppsvc.exe
+    $ifeoBase = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Image File Execution Options'
+    foreach ($exeName in @('osppsvc.exe', 'sppsvc.exe')) {
+        $ifeoKeyPath = Join-Path -Path $ifeoBase -ChildPath $exeName
+        try {
+            if (Test-Path -LiteralPath $ifeoKeyPath) {
+                $ifeoProps = Get-ItemProperty -LiteralPath $ifeoKeyPath -ErrorAction Stop
+                $debuggerVal = $ifeoProps.Debugger
+                $ifeoInfo = [PSCustomObject]@{
+                    Target   = $exeName
+                    KeyPath  = $ifeoKeyPath
+                    Debugger = $debuggerVal
+                }
+                $diagnostics.IfeoRedirections += $ifeoInfo
+                if (-not [string]::IsNullOrWhiteSpace($debuggerVal)) {
+                    Write-DiagLog -Message "ALERTA: Redirección IFEO detectada en '$exeName' ($ifeoKeyPath) -> Debugger: $debuggerVal" -Level 'WARN'
+                } else {
+                    Write-DiagLog -Message "ALERTA: Clave IFEO presente para '$exeName' ($ifeoKeyPath) sin valor Debugger explícito." -Level 'WARN'
+                }
+            }
+        } catch {
+            Write-DiagLog -Message "Error al inspeccionar clave IFEO '$ifeoKeyPath': $($_.Exception.Message)" -Level 'ERROR'
+        }
+    }
+
+    if ($diagnostics.IfeoRedirections.Count -eq 0) {
+        Write-DiagLog -Message 'No se detectaron claves de redirección IFEO para osppsvc.exe ni sppsvc.exe.' -Level 'INFO'
     }
 
     # 4. Ubicación de ospp.vbs y análisis bloque por bloque de /dstatus

@@ -14,7 +14,8 @@ Suite modular portátil en PowerShell 5.1 sin dependencias externas:
 ## Módulos y Scripts que Funcionan
 
 - `Iniciar-M365Sanitizer.bat` e `Invoke-M365Sanitizer.ps1`: Carga de menú, validación de entorno y sistema de logging verificados en ejecuciones recientes.
-- `modules\Get-OfficeDiagnostics.ps1`: Ejecutado correctamente en modo solo lectura (detección de cachés de identidad y comprobación de rutas de Office).
+- `modules\Get-OfficeDiagnostics.ps1`: Ejecutado correctamente en modo solo lectura; corregida la resolución dinámica de `InstallationPath` (Click-to-Run / WOW6432Node) para `ospp.vbs` y `sppc.dll`/`sppc64.dll`/`sppc32.dll`, además de añadir detección de redirecciones IFEO (`osppsvc.exe` y `sppsvc.exe`).
+- `modules\Reset-OfficeLicenses.ps1`: Actualizada la resolución dinámica de `InstallationPath` para `ospp.vbs` y rutas VFS de `sppc.dll`/`sppc64.dll`/`sppc32.dll` con respaldo estándar en `Program Files` y `Program Files (x86)` (incluyendo rutas `\root\`). Validación sintáctica superada (0 errores).
 
 ## Pendiente de Depurar / Verificar
 

@@ -12,9 +12,26 @@ import zipfile
 
 from PyQt6.QtCore import QThread, pyqtSignal
 
-from config import CONFIG, get_cred, logger
+from config import CONFIG, get_cred, logger, obtener_ruta_aws_vpn
 
 CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
+DETACHED_PROCESS = getattr(subprocess, "DETACHED_PROCESS", 0x00000008)
+CREATE_NEW_PROCESS_GROUP = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0x00000200)
+
+
+def lanzar_proceso_desacoplado(exe_path):
+    """Inicia una aplicación gráfica externa desacoplada del proceso actual."""
+    cwd = os.path.dirname(exe_path) or None
+    subprocess.Popen(
+        [exe_path],
+        cwd=cwd,
+        shell=False,
+        close_fds=True,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        creationflags=DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP,
+    )
 
 
 def is_server_reachable(ip, port=445, timeout=1.5):
@@ -234,15 +251,69 @@ class WorkerCheckRed(QThread):
         self.user = user
         self.password = password
 
+    @staticmethod
+    def _es_raiz_unc(ruta):
+        """Indica si la ruta UNC apunta solo al servidor (ej. \\\\172.30.0.13) sin recurso compartido."""
+        limpia = ruta.strip().rstrip("\\/")
+        if not limpia.startswith("\\\\"):
+            return False
+        partes = [p for p in limpia[2:].split("\\") if p]
+        return len(partes) == 1
+
+    def _autenticar_y_verificar_raiz_unc(self, ip_objetivo):
+        """Verifica alcance TCP 445 y mantiene activa la sesión autenticada en IPC$."""
+        if not is_server_reachable(ip_objetivo, port=445, timeout=2.0):
+            return False
+
+        recurso_ipc = rf"\\{ip_objetivo}\IPC$"
+        cmd = ["net", "use", recurso_ipc]
+        if self.password is not None:
+            cmd.append(self.password)
+        if self.user:
+            cmd.append(f"/user:{self.user}")
+
+        res = subprocess.run(
+            cmd,
+            shell=False,
+            creationflags=CREATE_NO_WINDOW,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        )
+        if res.returncode == 0:
+            logger.info("Sesión SMB autenticada y activa en %s", recurso_ipc)
+            return True
+
+        logger.warning(
+            "No se pudo autenticar %s con 'net use' (código %s).",
+            recurso_ipc,
+            res.returncode,
+        )
+        return False
+
     def run(self):
         try:
             if self.ip and self.user and self.password:
                 limpiar_sesiones_smb_eidico([self.ip])
-                inyectar_credencial_smb(self.ip, self.user, self.password)
+                if not inyectar_credencial_smb(self.ip, self.user, self.password):
+                    self.finalizado.emit(
+                        False,
+                        f"No se pudo registrar la credencial para {self.ip}.",
+                        self.path,
+                    )
+                    return
+
+            es_raiz = self._es_raiz_unc(self.path)
+            ip_objetivo = self.ip or self.path.strip().lstrip("\\").split("\\")[0]
 
             limite = time.monotonic() + self.timeout
             while time.monotonic() < limite:
-                if os.path.exists(self.path):
+                if es_raiz:
+                    if self._autenticar_y_verificar_raiz_unc(ip_objetivo):
+                        logger.info("Acceso verificado a servidor de red: %s", self.path)
+                        self.finalizado.emit(True, self.msg_exito, self.path)
+                        return
+                elif os.path.exists(self.path):
                     logger.info("Acceso verificado a recurso de red: %s", self.path)
                     self.finalizado.emit(True, self.msg_exito, self.path)
                     return
@@ -270,10 +341,22 @@ class WorkerVerificacionInicio(QThread):
         try:
             ip1 = CONFIG["IP_SERVER_1"]
             if is_server_reachable(ip1):
-                inyectar_credencial_smb(ip1, CONFIG["USER_1"], get_cred(CONFIG["PASS_1_B64"]))
+                password_1 = get_cred(CONFIG["PASS_1_B64"])
+                inyectar_credencial_smb(ip1, CONFIG["USER_1"], password_1)
                 server_folder = CONFIG["SERVER_FOLDER"]
                 server_exe = os.path.join(server_folder, CONFIG["EXE_NAME"])
-                if os.path.exists(server_folder) and os.path.isfile(server_exe):
+
+                accesible = os.path.exists(server_folder) and os.path.isfile(server_exe)
+                if not accesible:
+                    logger.info(
+                        "Primer intento de acceso a %s falló; depurando sesión SMB y reintentando.",
+                        server_folder,
+                    )
+                    limpiar_sesiones_smb_eidico([ip1])
+                    inyectar_credencial_smb(ip1, CONFIG["USER_1"], password_1)
+                    accesible = os.path.exists(server_folder) and os.path.isfile(server_exe)
+
+                if accesible:
                     server_disponible = True
                     local_exe = os.path.join(CONFIG["LOCAL_FOLDER"], CONFIG["EXE_NAME"])
                     if not os.path.isfile(local_exe):
@@ -304,11 +387,12 @@ class WorkerAccionSistema(QThread):
 
     finalizado = pyqtSignal(bool, str)
 
-    def __init__(self, accion, zip_path=None, extract_dir=None):
+    def __init__(self, accion, zip_path=None, extract_dir=None, escritorio=None):
         super().__init__()
         self.accion = accion
         self.zip_path = zip_path
         self.extract_dir = extract_dir
+        self.escritorio = escritorio
 
     def run(self):
         try:
@@ -318,6 +402,10 @@ class WorkerAccionSistema(QThread):
                 self._limpiar_red()
             elif self.accion == "extraer_instalador":
                 self._extraer_instalador()
+            elif self.accion == "forzar_cierre_eidico":
+                self._forzar_cierre_eidico()
+            elif self.accion == "crear_accesos_directos":
+                self._crear_accesos_directos()
             else:
                 self.finalizado.emit(False, f"Acción desconocida: {self.accion}")
         except Exception as exc:
@@ -325,7 +413,7 @@ class WorkerAccionSistema(QThread):
             self.finalizado.emit(False, str(exc))
 
     def _reiniciar_vpn(self):
-        logger.info("Iniciando reinicio total de AWS VPN Client y servicio OpenVPN.")
+        logger.info("Iniciando reinicio total de AWS VPN Client y servicio VPN.")
         subprocess.run(
             ["taskkill", "/IM", "AWSVPNClient.exe", "/F"],
             shell=False,
@@ -334,14 +422,18 @@ class WorkerAccionSistema(QThread):
             stderr=subprocess.DEVNULL,
             check=False,
         )
-        subprocess.run(
-            ["net", "stop", "AWS VPN Client OpenVPN Service"],
-            shell=False,
-            creationflags=CREATE_NO_WINDOW,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            check=False,
-        )
+
+        servicios_vpn = ("AWS.VPN.Client.Service", "AWS VPN Client OpenVPN Service")
+        for servicio in servicios_vpn:
+            subprocess.run(
+                ["net", "stop", servicio],
+                shell=False,
+                creationflags=CREATE_NO_WINDOW,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                check=False,
+            )
+
         subprocess.run(
             ["ipconfig", "/flushdns"],
             shell=False,
@@ -351,20 +443,28 @@ class WorkerAccionSistema(QThread):
             check=False,
         )
         time.sleep(1)
-        res_start = subprocess.run(
-            ["net", "start", "AWS VPN Client OpenVPN Service"],
-            shell=False,
-            creationflags=CREATE_NO_WINDOW,
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        if res_start.returncode != 0:
-            logger.warning(
-                "net start del servicio AWS VPN devolvió código %s", res_start.returncode
+
+        servicio_iniciado = False
+        for servicio in servicios_vpn:
+            res_start = subprocess.run(
+                ["net", "start", servicio],
+                shell=False,
+                creationflags=CREATE_NO_WINDOW,
+                capture_output=True,
+                text=True,
+                check=False,
             )
-        if os.path.exists(CONFIG["VPN_EXE"]):
-            subprocess.Popen([CONFIG["VPN_EXE"]], shell=False)
+            if res_start.returncode == 0:
+                servicio_iniciado = True
+                logger.info("Servicio VPN iniciado: %s", servicio)
+                break
+
+        if not servicio_iniciado:
+            logger.warning("No se pudo iniciar ninguno de los servicios AWS VPN conocidos.")
+
+        ruta_vpn = obtener_ruta_aws_vpn()
+        if ruta_vpn:
+            lanzar_proceso_desacoplado(ruta_vpn)
         self.finalizado.emit(True, "Servicios VPN reiniciados correctamente.")
 
     def _limpiar_red(self):
@@ -393,6 +493,50 @@ class WorkerAccionSistema(QThread):
         destino_abrir = exe_path if exe_path else self.extract_dir
         logger.info("Instalador extraído correctamente en %s", self.extract_dir)
         self.finalizado.emit(True, destino_abrir)
+
+    def _forzar_cierre_eidico(self):
+        subprocess.run(
+            ["taskkill", "/IM", CONFIG["EXE_NAME"], "/F"],
+            shell=False,
+            creationflags=CREATE_NO_WINDOW,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        )
+        logger.info("Se solicitó cierre forzado de %s.", CONFIG["EXE_NAME"])
+        self.finalizado.emit(True, "Eidico cerrado correctamente.")
+
+    def _crear_accesos_directos(self):
+        escritorio = self.escritorio
+        lnk_1 = os.path.join(escritorio, f"Fileserver ({CONFIG['IP_SERVER_1']}).lnk")
+        lnk_2 = os.path.join(escritorio, "FILESERVER.lnk")
+        target_1 = rf"\\{CONFIG['IP_SERVER_1']}\Fileserver"
+        target_2 = rf"\\{CONFIG['IP_SERVER_2']}"
+
+        ps_cmd = (
+            "$ws = New-Object -ComObject WScript.Shell; "
+            "$s1 = $ws.CreateShortcut($env:EIDICO_LNK_1); "
+            "$s1.TargetPath = $env:EIDICO_TARGET_1; "
+            "$s1.Save(); "
+            "$s2 = $ws.CreateShortcut($env:EIDICO_LNK_2); "
+            "$s2.TargetPath = $env:EIDICO_TARGET_2; "
+            "$s2.Save()"
+        )
+        env = os.environ.copy()
+        env["EIDICO_LNK_1"] = lnk_1
+        env["EIDICO_TARGET_1"] = target_1
+        env["EIDICO_LNK_2"] = lnk_2
+        env["EIDICO_TARGET_2"] = target_2
+
+        subprocess.run(
+            ["powershell", "-NoProfile", "-Command", ps_cmd],
+            env=env,
+            shell=False,
+            creationflags=CREATE_NO_WINDOW,
+            check=True,
+        )
+        logger.info("Accesos directos creados en %s", escritorio)
+        self.finalizado.emit(True, "Accesos directos creados en su escritorio.")
 
 
 class WorkerProcesosEspeciales(QThread):
