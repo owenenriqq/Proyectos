@@ -1,0 +1,645 @@
+{
+  "app": {
+    "name": "EzSetup",
+    "version": "2.2.0",
+    "title": "EzSetup - Panel de Instalación y Configuración IT",
+    "app_user_model_id": "Eidico.EzSetup.2.2",
+    "copy_chunk_size_bytes": 65536,
+    "server_check_interval_ms": 15000,
+    "internet_probe_host": "1.1.1.1"
+  },
+  "servers": {
+    "fileserver_principal": {
+      "label": "Fileserver Principal (172.30.0.13)",
+      "host": "172.30.0.13",
+      "port": 445,
+      "unc_root": "\\\\172.30.0.13",
+      "default_user_hint": "eidico\\fexterno",
+      "desktop_shortcut": {
+        "name": "FILESERVER.lnk",
+        "target": "\\\\172.30.0.13",
+        "description": "Fileserver (\\\\172.30.0.13)",
+        "icon": "C:\\Windows\\System32\\shell32.dll,15"
+      }
+    },
+    "fileserver_aws": {
+      "label": "Fileserver AWS (172.31.11.146)",
+      "host": "172.31.11.146",
+      "port": 445,
+      "unc_root": "\\\\172.31.11.146\\Fileserver",
+      "default_user_hint": "foxeidico",
+      "desktop_shortcut": {
+        "name": "Fileserver (172.31.11.146).lnk",
+        "target": "\\\\172.31.11.146\\Fileserver",
+        "description": "Fileserver (\\\\172.31.11.146)",
+        "icon": ""
+      }
+    }
+  },
+  "local_paths": {
+    "sol_sistemas_dir": "C:\\Program Files (x86)\\Sol Sistemas",
+    "eidico_dir": "C:\\Program Files (x86)\\Sol Sistemas\\EIDICO",
+    "eidico_exe_dest": "C:\\Program Files (x86)\\Sol Sistemas\\EIDICO\\EidicoPrueba.EXE",
+    "eidico_desktop_lnk": "%USERPROFILE%\\Desktop\\Eidico.lnk",
+    "dotnet_framework_dir": "C:\\Windows\\Microsoft.NET\\Framework\\v4.0.30319",
+    "regasm_exe": "C:\\Windows\\Microsoft.NET\\Framework\\v4.0.30319\\RegAsm.exe",
+    "openvpn_config_dir": "C:\\Program Files\\OpenVPN\\config",
+    "fondos_eidico_dest_subdir": "Fondos Eidico",
+    "nitro_temp_extract_dir": "%USERPROFILE%\\Desktop\\NitroPDF",
+    "battery_report_path": "%TEMP%\\battery-report.html",
+    "credential_manager_shell": "shell:::{1206F5F1-0569-412C-8FEC-3204630DFB70}",
+    "optional_features_exe": "optionalfeatures.exe",
+    "credentials_enc_file": "credentials.enc",
+    "hdsentinel_exe_dest": "C:\\Program Files (x86)\\Hard Disk Sentinel\\HDSentinel.exe"
+  },
+  "registry": {
+    "dotnet35_key": "SOFTWARE\\Microsoft\\NET Framework Setup\\NDP\\v3.5",
+    "dotnet35_value": "Install"
+  },
+  "security": {
+    "users_group_sid": "S-1-5-32-545"
+  },
+  "urls": {
+    "forticlient_zip": {
+      "url": "http://eidico.net/recursos/descargas/FortiClient_x64.zip",
+      "filename": "FortiClient_x64.zip",
+      "embedded_msi_name": "FortiClientVPN_7.4.3.6002_Offline.msi",
+      "embedded_reg_name": "VPN Config.reg",
+      "open_after_download": true
+    },
+    "aws_vpn_msi": {
+      "url": "https://d20adtppz83p9s.cloudfront.net/WPF/latest/AWS_VPN_Client.msi",
+      "filename": "AWS_VPN_Client.msi",
+      "open_after_download": true
+    },
+    "sistema_contable_zip": {
+      "url": "http://eidico.net/recursos/descargas/Instalar_Fox_EIDICO.zip",
+      "filename": "Instalar_Fox_EIDICO.zip",
+      "open_after_download": true
+    }
+  },
+  "unc_paths": {
+    "eidico": {
+      "forticlient_zip": "\\\\172.30.0.13\\areas\\0-IT\\FortiClientVPN_7.4.3.6002_EIDICO.zip",
+      "forticlient_msi_name": "FortiClientVPN_7.4.3.6002_Offline.msi",
+      "forticlient_reg_name": "VPN Config.reg",
+      "aws_vpn_msi": "\\\\172.30.0.13\\areas\\0-IT\\AWS_VPN_Client.msi",
+      "fox_installer_exe": "\\\\172.30.0.13\\areas\\0-IT\\Instalar_Fox_EIDICO\\Instalar_Fox.exe",
+      "eidico_vbs": "\\\\172.30.0.13\\areas\\0-IT\\EIDICO.vbs",
+      "eidico_prueba_exe": "\\\\172.31.11.146\\Fileserver\\EidicoPrueba\\EidicoPrueba.EXE",
+      "produccion_zip": "\\\\172.30.0.13\\areas\\0-IT\\Produccion.zip",
+      "winscp_dir": "\\\\172.30.0.13\\areas\\0-IT\\PMC Instalador WinSCP",
+      "winscp_installer_exe": "\\\\172.30.0.13\\areas\\0-IT\\PMC Instalador WinSCP\\WinSCP-5.13.3-Setup.exe",
+      "winscp_files": [
+        "WinSCPnet.dll",
+        "WINSCP.exe"
+      ],
+      "openvpn_dir": "\\\\172.30.0.13\\areas\\0-IT\\Open VPN",
+      "openvpn_installer_exe": "\\\\172.30.0.13\\areas\\0-IT\\Open VPN\\openvpn-install-2.4.6-I602.exe",
+      "openvpn_config_files": [
+        "vicky.key",
+        "vicky.crt",
+        "ems.tlsauth",
+        "client.ovpn",
+        "ca.crt"
+      ],
+      "nitropdf_zip": "\\\\172.30.0.13\\areas\\0-IT\\NitroPDF.zip",
+      "nitropdf_msi_name": "nitro_pro13_x64.msi",
+      "fondos_eidico_dir": "\\\\172.30.0.13\\areas\\0-IT\\Fondos Eidico 4K",
+      "upanel_anura_exe": "\\\\172.30.0.13\\it\\SOFTWARE\\uPanel Anura Setup 4.4.2.exe",
+      "credentials_enc_unc": "\\\\172.30.0.13\\areas\\0-IT\\credentials.enc"
+    },
+    "tecnica": {
+      "autocad_2021_iso": "\\\\172.30.0.13\\it\\SOFTWARE\\TECNICA\\Autodesk.AutoCAD.2021.Multilingual.Incl.Kg\\Autodesk_AutoCAD_2021_ML_x64.iso",
+      "autocad_2021_setup_rel": "Setup.exe",
+      "autocad_2021_instructions": "\\\\172.30.0.13\\it\\SOFTWARE\\TECNICA\\Autodesk.AutoCAD.2021.Multilingual.Incl.Kg\\Instrucciones.txt",
+      "autocad_2021_firewall": {
+        "in_out_dirs": [
+          "%ProgramFiles%\\Autodesk\\AutoCAD 2021",
+          "%ProgramFiles(x86)%\\Common Files\\Autodesk Shared\\AdskLicensing",
+          "%AppData%\\Autodesk\\ADPSDK"
+        ],
+        "recursive_out_dirs": [
+          "%ProgramFiles%\\Autodesk\\AutoCAD 2021"
+        ],
+        "in_out_rule_prefix": "Block_Autodesk_",
+        "recursive_out_rule_prefix": "ACAD_Recursive_Block_"
+      },
+      "revit_lt_2020_exe": "\\\\172.30.0.13\\it\\SOFTWARE\\TECNICA\\Autodesk Revit LT 2020.1 (x64) Multilanguage\\RevitLT_2020_G1_Win_64bit_r1_dlm_001_004\\RevitLT_2020_G1_Win_64bit_r1_dlm_001_004\\RevitLT_2020_G1_Win_64bit_r1_dlm_001_004.sfx.exe",
+      "dwg_trueview_2020_installer": "",
+      "sketchup_installer": ""
+    },
+    "office": {
+      "o365_proplus_2021_img": "\\\\172.30.0.13\\it\\SOFTWARE\\Microsoft\\Office\\O365ProPlus2021Retail.img",
+      "project_pro_2021_img": "\\\\172.30.0.13\\it\\SOFTWARE\\Microsoft\\Office\\ProjectPro2021Retail.img",
+      "visio_pro_2021_img": "\\\\172.30.0.13\\it\\SOFTWARE\\Microsoft\\Office\\VisioPro2021Retail.img",
+      "office_setup_rel": "Office\\Setup64.exe"
+    },
+    "adobe": {
+      "adobe_2022_iso": "\\\\172.30.0.13\\it\\SOFTWARE\\Adobe2022\\Adobe.Master.Collection.CC.2022.v03.02.2022.Multilingual.Win-x64.iso",
+      "adobe_setup_rel": "Set-up.exe"
+    },
+    "diagnostics": {
+      "hdsentinel_setup_exe": "\\\\172.30.0.13\\it\\SOFTWARE\\Hard Disk Sentinel Pro 5.50 Build 10482 + Crack\\hdsentinel_pro_setup.exe",
+      "hdsentinel_key_reg": "\\\\172.30.0.13\\it\\SOFTWARE\\Hard Disk Sentinel Pro 5.50 Build 10482 + Crack\\Key (64bits)\\key.reg",
+      "hdsentinel_crack_zip": "\\\\172.30.0.13\\it\\SOFTWARE\\Hard Disk Sentinel Pro 5.50 Build 10482 + Crack\\Crack.zip",
+      "hdsentinel_exe_name": "HDSentinel.exe"
+    }
+  },
+  "menus": [
+    {
+      "id": "eidico",
+      "title": "EIDICO",
+      "subgroups": [
+        {
+          "title": "Gestión y Herramientas",
+          "items": [
+            {
+              "id": "fox_suite",
+              "title": "Sistema de Gestión (Fox)",
+              "badge": "Suite",
+              "badge_style": "RowBadgeOk",
+              "actions": [
+                {
+                  "label": "Descargar",
+                  "style": "",
+                  "type": "url",
+                  "url_key": "sistema_contable_zip"
+                },
+                {
+                  "label": "Instalar",
+                  "style": "PrimaryButton",
+                  "type": "exe",
+                  "path": "\\\\172.30.0.13\\areas\\0-IT\\Instalar_Fox_EIDICO\\Instalar_Fox.exe"
+                },
+                {
+                  "label": "Configurar Puesto",
+                  "style": "SuccessButton",
+                  "type": "task",
+                  "task": "fox_configure_workstation",
+                  "tooltip": "Ejecutar pasos 3, 4, 5 y 6: Acceso Directo, Permisos Sol Sistemas, EIDICO.vbs y EidicoPrueba.EXE"
+                },
+                {
+                  "label": "Acceso Directo",
+                  "type": "task",
+                  "task": "fix_eidico_shortcut",
+                  "tooltip": "Corregir 'Iniciar en' de Eidico.lnk"
+                },
+                {
+                  "label": "Permisos Sol Sistemas",
+                  "type": "task",
+                  "task": "set_sol_sistemas_permissions",
+                  "tooltip": "Asignar FullControl al grupo Users (S-1-5-32-545) en Sol Sistemas"
+                },
+                {
+                  "label": "Copiar EIDICO.vbs",
+                  "type": "task",
+                  "task": "copy_eidico_vbs",
+                  "tooltip": "Copiar EIDICO.vbs desde red a carpeta EIDICO"
+                },
+                {
+                  "label": "Copiar EidicoPrueba.EXE",
+                  "type": "task",
+                  "task": "copy_eidico_prueba",
+                  "tooltip": "Transferir EidicoPrueba.EXE con barra de progreso"
+                },
+                {
+                  "label": "Extraer Produccion.zip",
+                  "type": "task",
+                  "task": "extract_produccion_zip",
+                  "tooltip": "Extraer Produccion.zip en carpeta EIDICO"
+                }
+              ]
+            },
+            {
+              "id": "winscp_com",
+              "title": "WinSCP (.NET / COM)",
+              "actions": [
+                {
+                  "label": "Instalar",
+                  "style": "PrimaryButton",
+                  "type": "exe",
+                  "path": "\\\\172.30.0.13\\areas\\0-IT\\PMC Instalador WinSCP\\WinSCP-5.13.3-Setup.exe"
+                },
+                {
+                  "label": "Configurar .NET",
+                  "style": "SuccessButton",
+                  "type": "task",
+                  "task": "copy_and_register_winscp",
+                  "tooltip": "Copiar WinSCPnet.dll/WINSCP.exe a .NET v4.0.30319 y registrar con RegAsm"
+                },
+                {
+                  "label": "Copiar DLL",
+                  "type": "task",
+                  "task": "copy_winscp_to_dotnet",
+                  "tooltip": "Copiar WinSCPnet.dll y WINSCP.exe a .NET v4.0.30319"
+                },
+                {
+                  "label": "RegAsm",
+                  "type": "task",
+                  "task": "register_winscp_regasm",
+                  "tooltip": "Registrar WinSCPnet.dll con RegAsm.exe /codebase /tlb"
+                }
+              ]
+            },
+            {
+              "id": "upanel_anura",
+              "title": "uPanel Anura 4.4.2",
+              "actions": [
+                {
+                  "label": "Instalar",
+                  "style": "PrimaryButton",
+                  "type": "exe",
+                  "path": "\\\\172.30.0.13\\it\\SOFTWARE\\uPanel Anura Setup 4.4.2.exe"
+                }
+              ]
+            },
+            {
+              "id": "fondos_eidico",
+              "title": "Fondos Eidico 4K",
+              "actions": [
+                {
+                  "label": "Copiar",
+                  "style": "PrimaryButton",
+                  "type": "task",
+                  "task": "copy_fondos_eidico",
+                  "tooltip": "Copiar Fondos Eidico 4K a la biblioteca Imágenes del usuario"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "title": "VPN y Accesos Remotos",
+          "items": [
+            {
+              "id": "forticlient_vpn",
+              "title": "FortiClient VPN",
+              "actions": [
+                {
+                  "label": "Instalar",
+                  "style": "PrimaryButton",
+                  "type": "task",
+                  "task": "install_forticlient_lan",
+                  "tooltip": "Extraer y ejecutar MSI desde FortiClientVPN_7.4.3.6002_EIDICO.zip"
+                },
+                {
+                  "label": "Configurar Todo",
+                  "style": "SuccessButton",
+                  "type": "task",
+                  "task": "install_and_configure_forticlient_lan",
+                  "tooltip": "Instalar MSI e importar silenciosamente VPN Config.reg desde el paquete ZIP"
+                },
+                {
+                  "label": "Importar .reg",
+                  "type": "task",
+                  "task": "import_forticlient_reg_lan",
+                  "tooltip": "Importar silenciosamente VPN Config.reg desde el paquete ZIP en red"
+                },
+                {
+                  "label": "Descargar",
+                  "type": "url",
+                  "url_key": "forticlient_zip",
+                  "install_embedded_msi": true,
+                  "import_embedded_reg": true
+                }
+              ]
+            },
+            {
+              "id": "aws_vpn",
+              "title": "AWS VPN Client",
+              "actions": [
+                {
+                  "label": "Descargar",
+                  "style": "",
+                  "type": "url",
+                  "url_key": "aws_vpn_msi"
+                },
+                {
+                  "label": "Instalar",
+                  "style": "PrimaryButton",
+                  "type": "msi",
+                  "path": "\\\\172.30.0.13\\areas\\0-IT\\AWS_VPN_Client.msi"
+                }
+              ]
+            },
+            {
+              "id": "openvpn",
+              "title": "OpenVPN",
+              "actions": [
+                {
+                  "label": "Copiar Config",
+                  "style": "",
+                  "type": "task",
+                  "task": "copy_openvpn_configs",
+                  "tooltip": "Copiar certificados y client.ovpn a C:\\Program Files\\OpenVPN\\config"
+                },
+                {
+                  "label": "Instalar",
+                  "style": "PrimaryButton",
+                  "type": "exe",
+                  "path": "\\\\172.30.0.13\\areas\\0-IT\\Open VPN\\openvpn-install-2.4.6-I602.exe"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "ofimatica_diseno",
+      "title": "Ofimática y Diseño",
+      "subgroups": [
+        {
+          "title": "Suite Microsoft y PDF",
+          "items": [
+            {
+              "id": "o365_proplus_2021",
+              "title": "Office 365 ProPlus 2021",
+              "actions": [
+                {
+                  "label": "Instalar",
+                  "style": "PrimaryButton",
+                  "type": "iso",
+                  "path": "\\\\172.30.0.13\\it\\SOFTWARE\\Microsoft\\Office\\O365ProPlus2021Retail.img",
+                  "setup_rel": "Office\\Setup64.exe"
+                }
+              ]
+            },
+            {
+              "id": "project_pro_2021",
+              "title": "Project Pro 2021",
+              "actions": [
+                {
+                  "label": "Instalar",
+                  "style": "PrimaryButton",
+                  "type": "iso",
+                  "path": "\\\\172.30.0.13\\it\\SOFTWARE\\Microsoft\\Office\\ProjectPro2021Retail.img",
+                  "setup_rel": "Office\\Setup64.exe"
+                }
+              ]
+            },
+            {
+              "id": "visio_pro_2021",
+              "title": "Visio Pro 2021",
+              "actions": [
+                {
+                  "label": "Instalar",
+                  "style": "PrimaryButton",
+                  "type": "iso",
+                  "path": "\\\\172.30.0.13\\it\\SOFTWARE\\Microsoft\\Office\\VisioPro2021Retail.img",
+                  "setup_rel": "Office\\Setup64.exe"
+                }
+              ]
+            },
+            {
+              "id": "nitro_pdf_13",
+              "title": "Nitro PDF Pro 13",
+              "badge": "MSI Oficial",
+              "badge_style": "RowBadgeMuted",
+              "actions": [
+                {
+                  "label": "Instalar",
+                  "style": "PrimaryButton",
+                  "type": "task",
+                  "task": "install_nitropdf_lan",
+                  "tooltip": "Extraer e instalar MSI oficial desde NitroPDF.zip"
+                },
+                {
+                  "label": "Limpiar Temp",
+                  "type": "task",
+                  "task": "cleanup_nitropdf_temp",
+                  "tooltip": "Eliminar carpeta temporal NitroPDF del Escritorio"
+                }
+              ],
+              "primary_count": 1
+            }
+          ]
+        },
+        {
+          "title": "Diseño Creativo",
+          "items": [
+            {
+              "id": "adobe_cc_2022",
+              "title": "Adobe Master Collection 2022",
+              "actions": [
+                {
+                  "label": "Instalar",
+                  "style": "PrimaryButton",
+                  "type": "iso",
+                  "path": "\\\\172.30.0.13\\it\\SOFTWARE\\Adobe2022\\Adobe.Master.Collection.CC.2022.v03.02.2022.Multilingual.Win-x64.iso",
+                  "setup_rel": "Set-up.exe"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "tecnica",
+      "title": "Técnica",
+      "subgroups": [
+        {
+          "title": "CAD y BIM",
+          "items": [
+            {
+              "id": "autocad_2021",
+              "title": "Autodesk AutoCAD 2021",
+              "actions": [
+                {
+                  "label": "Instructivo",
+                  "style": "",
+                  "type": "task",
+                  "task": "open_autocad_instructions",
+                  "tooltip": "Abrir Instrucciones.txt de AutoCAD 2021"
+                },
+                {
+                  "label": "Firewall",
+                  "style": "",
+                  "type": "task",
+                  "task": "apply_autocad_firewall_block",
+                  "tooltip": "Aplicar reglas de bloqueo Inbound/Outbound en Firewall de Windows sin duplicar"
+                },
+                {
+                  "label": "Instalar",
+                  "style": "PrimaryButton",
+                  "type": "iso",
+                  "path": "\\\\172.30.0.13\\it\\SOFTWARE\\TECNICA\\Autodesk.AutoCAD.2021.Multilingual.Incl.Kg\\Autodesk_AutoCAD_2021_ML_x64.iso",
+                  "setup_rel": "Setup.exe"
+                }
+              ]
+            },
+            {
+              "id": "revit_lt_2020",
+              "title": "Autodesk Revit LT 2020.1",
+              "actions": [
+                {
+                  "label": "Instalar",
+                  "style": "PrimaryButton",
+                  "type": "exe",
+                  "path": "\\\\172.30.0.13\\it\\SOFTWARE\\TECNICA\\Autodesk Revit LT 2020.1 (x64) Multilanguage\\RevitLT_2020_G1_Win_64bit_r1_dlm_001_004\\RevitLT_2020_G1_Win_64bit_r1_dlm_001_004\\RevitLT_2020_G1_Win_64bit_r1_dlm_001_004.sfx.exe"
+                }
+              ]
+            },
+            {
+              "id": "dwg_trueview_2020",
+              "title": "Autodesk DWG TrueView 2020",
+              "hide_if_empty": true,
+              "actions": [
+                {
+                  "label": "Instalar",
+                  "style": "PrimaryButton",
+                  "type": "exe",
+                  "path": ""
+                }
+              ]
+            },
+            {
+              "id": "sketchup",
+              "title": "SketchUp",
+              "hide_if_empty": true,
+              "actions": [
+                {
+                  "label": "Instalar",
+                  "style": "PrimaryButton",
+                  "type": "exe",
+                  "path": ""
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "reparaciones_diagnostico",
+      "title": "Reparaciones y Diagnóstico",
+      "subgroups": [
+        {
+          "title": "Sistema, Discos y Energía",
+          "items": [
+            {
+              "id": "dotnet_35",
+              "title": "Habilitar .NET Framework 3.5",
+              "status_source": "dotnet35",
+              "actions": [
+                {
+                  "label": "Verificar",
+                  "style": "",
+                  "type": "task",
+                  "task": "refresh_dotnet35_status",
+                  "tooltip": "Consultar estado en HKLM\\SOFTWARE\\Microsoft\\NET Framework Setup\\NDP\\v3.5"
+                },
+                {
+                  "label": "Habilitar",
+                  "style": "PrimaryButton",
+                  "type": "task",
+                  "task": "open_optional_features",
+                  "tooltip": "Abrir Características de Windows (optionalfeatures.exe)"
+                }
+              ]
+            },
+            {
+              "id": "hdsentinel_pro",
+              "title": "Hard Disk Sentinel Pro 5.50",
+              "actions": [
+                {
+                  "label": "Instalar",
+                  "style": "PrimaryButton",
+                  "type": "exe",
+                  "path": "\\\\172.30.0.13\\it\\SOFTWARE\\Hard Disk Sentinel Pro 5.50 Build 10482 + Crack\\hdsentinel_pro_setup.exe"
+                },
+                {
+                  "label": "Importar Key (.reg)",
+                  "type": "reg",
+                  "path": "\\\\172.30.0.13\\it\\SOFTWARE\\Hard Disk Sentinel Pro 5.50 Build 10482 + Crack\\Key (64bits)\\key.reg"
+                },
+                {
+                  "label": "Copiar HDSentinel.exe",
+                  "type": "task",
+                  "task": "hdsentinel_replace_exe",
+                  "tooltip": "Extraer HDSentinel.exe desde Crack.zip, cerrar si está en ejecución y copiar en Program Files (x86)"
+                }
+              ],
+              "primary_count": 1
+            },
+            {
+              "id": "battery_report",
+              "title": "Reporte de Salud de Batería",
+              "actions": [
+                {
+                  "label": "Generar",
+                  "style": "PrimaryButton",
+                  "type": "task",
+                  "task": "generate_battery_report",
+                  "tooltip": "Ejecutar powercfg /batteryreport y abrir informe en el navegador"
+                }
+              ]
+            },
+            {
+              "id": "renew_ip_dns",
+              "title": "Adaptadores de Red (IP y DNS)",
+              "actions": [
+                {
+                  "label": "Renovar IP y DNS",
+                  "style": "PrimaryButton",
+                  "type": "task",
+                  "task": "renew_ip_dns",
+                  "confirm": "Se reiniciarán las concesiones de red (flushdns, release, renew y registerdns), lo que cortará momentáneamente Internet y la VPN.\n\n¿Deseás continuar?",
+                  "refresh_network": true,
+                  "tooltip": "Ejecutar ipconfig /flushdns, /release, /renew y /registerdns y verificar conectividad"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "credenciales_red",
+      "title": "Credenciales y Red",
+      "subgroups": [
+        {
+          "title": "Accesos y Credenciales",
+          "items": [
+            {
+              "id": "server_credentials",
+              "title": "Credenciales de Servidores (cmdkey)",
+              "status_source": "credentials_enc",
+              "actions": [
+                {
+                  "label": "Administrador",
+                  "style": "",
+                  "type": "task",
+                  "task": "open_credential_manager",
+                  "tooltip": "Abrir Administrador de Credenciales de Windows"
+                },
+                {
+                  "label": "Credenciales",
+                  "style": "PrimaryButton",
+                  "type": "task",
+                  "task": "open_credentials_dialog",
+                  "tooltip": "Descifrar credentials.enc con Contraseña Maestra o ingresar manualmente"
+                }
+              ]
+            },
+            {
+              "id": "network_shortcuts",
+              "title": "Accesos Directos de Red",
+              "actions": [
+                {
+                  "label": "Crear en Escritorio",
+                  "style": "PrimaryButton",
+                  "type": "task",
+                  "task": "create_network_shortcuts",
+                  "tooltip": "Crear accesos directos .lnk a 172.30.0.13 y 172.31.11.146 sin pedir contraseñas"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

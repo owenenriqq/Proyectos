@@ -1,0 +1,25 @@
+# Entorno virtual
+.venv/
+venv/
+env/
+
+# Artefactos de PyInstaller y compilación
+build/
+dist/
+*.spec
+
+# Caché de Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+
+# Archivos temporales, logs y credenciales locales
+*.tmp
+*.log
+*.enc
+.env
+*credentials*
+*.cred
+Thumbs.db
+desktop.ini
