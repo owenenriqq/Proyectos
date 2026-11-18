@@ -1,0 +1,89 @@
+# Estado del Proyecto — Gestor-Redes
+
+## 1. Resumen y Arquitectura
+
+**Gestor de Redes v1.0.0** es una aplicación de escritorio standalone para Windows 10/11 desarrollada en **Python 3.12 + PyQt6** para la administración de adaptadores de red, configuración IPv4/DHCP y DNS, renovación de concesiones/caché y diagnóstico integral de conectividad, manteniendo una interfaz oscura monocromática minimalista y elevación UAC integrada.
+
+### Stack Tecnológico
+- **Lenguaje**: Python 3.12 (sin dependencias externas fuera de `PyQt6` y `pyinstaller`)
+- **Interfaz Gráfica**: `PyQt6` con paleta oscura monocromática QSS (`styles.py`), filas horizontales compactas (`ActionRow`) y panel de registro colapsable
+- **Capa de Red Windows**: `subprocess` con `shell=False` + `CREATE_NO_WINDOW` sobre cmdlets nativos (`Get-NetAdapter`, `Enable/Disable/Restart-NetAdapter`), `netsh`, `ipconfig`, `ping`, `tracert`, `nslookup`, `route`, `arp` y `socket`
+- **Empaquetado**: `PyInstaller` (`build.ps1`) con `--onefile --windowed --uac-admin`
+
+### Estructura de Archivos
+```text
+Gestor-Redes/
+├── main.py             # Entrypoint con elevación UAC, AppUserModelID y ventana principal (MainWindow)
+├── net_tasks.py        # Inventario de adaptadores, IPv4/DHCP, DNS, habilitar/deshabilitar, renovación y diagnóstico
+├── dialogs.py          # Modales: IPConfigDialog, DNSConfigDialog, AdapterDetailsDialog y DiagnosticResultDialog
+├── workers.py          # QThreads: AdapterRefreshWorker, ConnectivityCheckWorker, TaskWorker y DiagnosticWorker
+├── styles.py           # Hoja de estilos QSS oscura monocromática
+├── requirements.txt    # Dependencias mínimas (PyQt6 y pyinstaller)
+├── build.ps1           # Script de compilación standalone a dist\GestorRedes.exe
+├── .gitignore          # Exclusiones de entorno virtual, compilación y temporales
+├── GEMINI.md           # Reglas de arquitectura, seguridad y flujo de trabajo
+└── ESTADO.md           # Bitácora viva del proyecto
+```
+
+### Comandos de Instalación, Ejecución y Compilación
+- **Crear entorno virtual e instalar dependencias**:
+  ```powershell
+  python -m venv .venv
+  .venv\Scripts\pip.exe install -r requirements.txt
+  ```
+- **Ejecución local**:
+  - Normal (con elevación UAC): `.venv\Scripts\python.exe main.py`
+  - Sin elevación (solo inspección/UI): `.venv\Scripts\python.exe main.py --no-elevate`
+- **Compilación de `dist\GestorRedes.exe`**:
+  ```powershell
+  powershell -ExecutionPolicy Bypass -File build.ps1
+  ```
+
+---
+
+## 2. Estado Actual
+
+### Módulos Completados
+- [x] `net_tasks.py`: inventario completo de adaptadores (`list_network_adapters`), configuración IPv4 DHCP/estática (`set_adapter_dhcp`, `set_adapter_static_ip`), configuración DNS con perfiles rápidos (`set_adapter_dns`, `DNS_PRESETS`), habilitar/deshabilitar/reiniciar adaptadores (`set_adapter_enabled`, `restart_adapter`), renovación IP/DNS (`renew_ip_and_dns`, `flush_dns_cache`), secuencias automáticas (`run_quick_repair`, `run_deep_network_cleanup`), restablecimiento Winsock/TCP-IP (`reset_winsock_and_tcpip`), acceso a `ncpa.cpl` y suite de diagnóstico (`check_internet_connectivity`, `run_ping`, `run_traceroute`, `run_nslookup`, `run_tcp_port_check`, `get_ipconfig_all`, `get_routing_table`, `get_arp_table`, `run_full_network_diagnostic`, `generate_full_diagnostic_report`).
+- [x] `styles.py`: tema oscuro monocromático (`#0F1012` / `#17191D` / `#272A30` / `#F4F4F5`) con badges semánticos de estado y controles estilizados.
+- [x] `workers.py`: workers `QThread` asíncronos no bloqueantes con traducción amigable de errores UAC (`format_task_exception`).
+- [x] `dialogs.py`: diálogos modales para configurar IPv4/DHCP (`IPConfigDialog`), DNS con presets (`DNSConfigDialog`), detalle de adaptador (`AdapterDetailsDialog`) y visor ampliado de diagnóstico (`DiagnosticResultDialog`).
+- [x] `main.py`: elevación UAC automática + badge interactivo `"Sin UAC"`, indicador de conectividad externa en header, 3 vistas laterales (`Adaptadores de Red` sin scroll horizontal innecesario, `Renovación y Caché` con sección `SECUENCIAS AUTOMÁTICAS` y sin `ncpa.cpl` duplicado, `Diagnóstico de Red` con `Generar Reporte Completo` y exportación `.txt`), filtro rápido (`Ctrl+F`), refresco (`F5`), botón vectorial `⋮` y panel inferior de registro colapsable.
+- [x] `requirements.txt`, `build.ps1`, `.gitignore`, `GEMINI.md` y `ESTADO.md`.
+
+### En Progreso
+- Ninguno.
+
+### Pendientes
+- [x] Crear `.venv` local en `Gestor-Redes\` e instalar `requirements.txt`.
+- [x] Compilar `dist\GestorRedes.exe` con `build.ps1` y validar el ejecutable standalone.
+- [ ] Ejecutar prueba interactiva con privilegios UAC sobre un adaptador real (cambio DHCP/IP estática, DNS, habilitar/deshabilitar, Reparación Rápida y Limpieza Profunda).
+
+---
+
+## 3. Historial de Cambios
+
+- **2026-11-18 — v1.0.2 (Ícono de aplicación, ajuste de ventana y compilación EXE)**:
+  - Instalado `pillow` (13.0.0) en `.venv` y generado `assets\icon.ico` desde `assets\icon.svg` mediante `PyQt6.QtSvg.QSvgRenderer` + `QImage` + `Pillow` (resoluciones 16, 24, 32, 48, 64, 128 y 256 px).
+  - `main.py`: ajustado tamaño inicial de `MainWindow` a `1080x680` y mínimo a `1040x620`; cargado `assets\icon.ico` en `QApplication` y `MainWindow` soportando ejecución normal y empaquetada (`sys._MEIPASS`).
+  - `build.ps1`: configurado `--icon "assets\icon.ico"` y `--add-data "assets\icon.ico;assets"`.
+  - Ejecutado `build.ps1` con éxito, generando `dist\GestorRedes.exe` (34.270.063 bytes) con ícono y manifiesto UAC embebidos.
+  - Verificación aprobada: smoke test offscreen (`ICON_AND_SIZE_OK`) y compilación PyInstaller sin errores.
+
+- **2026-11-18 — v1.0.1 (Secuencias automáticas, reporte completo y ajustes de UI)**:
+  - `net_tasks.py`: agregadas `run_quick_repair` (flushdns -> release/renew -> reinicio de adaptador conectado -> verificación de conectividad), `run_deep_network_cleanup` (flushdns -> `arp -d *` -> `netsh winsock reset` -> `netsh int ip reset`) y `generate_full_diagnostic_report` (Diagnóstico Integral + `ipconfig /all` + `route print -4` + `arp -a` con separadores).
+  - `main.py`:
+    - En **Renovación y Caché**: eliminada la fila duplicada de `ncpa.cpl` y agregada la sección `SECUENCIAS AUTOMÁTICAS` con "Reparación Rápida (Sin reinicio)" y "Limpieza Profunda de Red" (badge `"Requiere reinicio"` y confirmación previa).
+    - En **Diagnóstico de Red**: agregada la acción "Generar Reporte Completo" y el botón "Exportar Reporte (.txt)" junto a Ampliar/Copiar/Limpiar.
+    - En **Adaptadores de Red**: deshabilitado el scroll horizontal (`Qt.ScrollBarPolicy.ScrollBarAlwaysOff`).
+  - Verificación aprobada con `.venv\Scripts\python.exe`: análisis sintáctico AST de los 5 módulos `.py`, comprobación de importaciones y smoke test offscreen de `MainWindow` (`UI_SMOKE_OK`).
+
+- **2026-11-18 — v1.0.0 (Creación inicial standalone)**:
+  - Creado el proyecto independiente `Gestor-Redes\` con arquitectura plana modular (`main.py`, `net_tasks.py`, `dialogs.py`, `workers.py`, `styles.py`).
+  - Implementadas todas las funciones de gestión de adaptadores (IPv4/DHCP, DNS, habilitar/deshabilitar, reinicio, renovación IP/DNS, restablecimiento Winsock/TCP-IP y diagnóstico completo de red), incluyendo fallback automático `.NET NetworkInterface` cuando el servicio CIM/WMI está restringido.
+  - Verificación aprobada: análisis sintáctico AST de los 5 módulos `.py`, validación de direcciones IPv4/máscaras/hosts, decodificación correcta de salida Windows en español (`ipconfig /all`), enumeración real de adaptadores (5 interfaces detectadas) y auditoría de cero referencias externas.
+
+---
+
+## 4. Próximos Pasos
+1. Ejecutar `dist\GestorRedes.exe` (con UAC) o `.venv\Scripts\python.exe main.py` para validar visualmente el ícono, la ventana (`1080x680`) y las operaciones reales de red sobre un adaptador.
