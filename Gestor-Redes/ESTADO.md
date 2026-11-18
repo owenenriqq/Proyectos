@@ -63,6 +63,14 @@ Gestor-Redes/
 
 ## 3. Historial de Cambios
 
+- **2026-11-18 — v1.0.3 (Corrección de recorte horizontal en QScrollArea y ActionRow)**:
+  - `main.py`:
+    - `_create_scroll_container()`: configurado `scroll.setWidgetResizable(True)`, `ScrollBarAlwaysOff` en horizontal, `QSizePolicy.Policy.Expanding` en el contenedor interno y margen derecho ajustado a `14 px` (`18, 10, 14, 14`) para alinear las tarjetas con el buscador superior.
+    - `ActionRow` y `adapters_list_container`: `ActionRow` con `Expanding` horizontal, `title_lbl` con `setWordWrap(True)`, `meta_lbl` con `QSizePolicy.Policy.Ignored` horizontal, y botones derechos (`visible_actions` y `⋮`) con `QSizePolicy.Policy.Fixed`.
+    - En la vista de Diagnóstico, `out_title` (`SALIDA DE DIAGNÓSTICO`) configurado con `QSizePolicy.Policy.Ignored` y `stretch=1` para no empujar la fila de botones de salida.
+  - Verificación aprobada con smoke test offscreen (`verify_layout.py` a `1040x620`): `PAGE_0_OK`, `PAGE_1_OK`, `PAGE_2_OK`, `LAYOUT_CLIP_CHECK_OK` (todos los botones derechos dentro del ancho del viewport).
+  - Nota de compilación: `build.ps1` falló al intentar eliminar `dist\GestorRedes.exe` por `Acceso denegado` (archivo en uso por una instancia abierta de `GestorRedes.exe`).
+
 - **2026-11-18 — v1.0.2 (Ícono de aplicación, ajuste de ventana y compilación EXE)**:
   - Instalado `pillow` (13.0.0) en `.venv` y generado `assets\icon.ico` desde `assets\icon.svg` mediante `PyQt6.QtSvg.QSvgRenderer` + `QImage` + `Pillow` (resoluciones 16, 24, 32, 48, 64, 128 y 256 px).
   - `main.py`: ajustado tamaño inicial de `MainWindow` a `1080x680` y mínimo a `1040x620`; cargado `assets\icon.ico` en `QApplication` y `MainWindow` soportando ejecución normal y empaquetada (`sys._MEIPASS`).

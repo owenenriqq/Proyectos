@@ -37,6 +37,7 @@ from PyQt6.QtWidgets import (
     QPlainTextEdit,
     QPushButton,
     QScrollArea,
+    QSizePolicy,
     QSplitter,
     QStackedWidget,
     QVBoxLayout,
@@ -131,6 +132,7 @@ class ActionRow(QFrame):
     ) -> None:
         super().__init__(parent)
         self.setObjectName("ActionRow")
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         self.setMinimumHeight(44 if not meta_text else 58)
         if tooltip:
             self.setToolTip(tooltip)
@@ -149,6 +151,7 @@ class ActionRow(QFrame):
 
         title_lbl = QLabel(title, self)
         title_lbl.setObjectName("RowTitle")
+        title_lbl.setWordWrap(True)
         title_line.addWidget(title_lbl)
 
         self.badge_label = QLabel(badge_text, self)
@@ -167,6 +170,8 @@ class ActionRow(QFrame):
         if meta_text:
             meta_lbl = QLabel(meta_text, self)
             meta_lbl.setObjectName("RowMeta")
+            meta_lbl.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+            meta_lbl.setMinimumWidth(0)
             meta_lbl.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
             left_col.addWidget(meta_lbl)
 
@@ -178,6 +183,7 @@ class ActionRow(QFrame):
 
         for text, obj_name, btn_tip, handler in visible_actions:
             btn = QPushButton(text, self)
+            btn.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
             if obj_name:
                 btn.setObjectName(obj_name)
             if btn_tip:
@@ -188,6 +194,7 @@ class ActionRow(QFrame):
         if overflow_actions:
             more_btn = QPushButton("", self)
             more_btn.setObjectName("MoreButton")
+            more_btn.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
             more_btn.setFixedSize(32, 30)
             more_btn.setIcon(_create_more_dots_icon())
             more_btn.setIconSize(QSize(16, 16))
@@ -371,9 +378,11 @@ class MainWindow(QMainWindow):
     def _create_scroll_container(self) -> tuple[QScrollArea, QWidget, QVBoxLayout]:
         scroll = QScrollArea(self.stack)
         scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         container = QWidget(scroll)
+        container.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         layout = QVBoxLayout(container)
-        layout.setContentsMargins(18, 10, 18, 14)
+        layout.setContentsMargins(18, 10, 14, 14)
         layout.setSpacing(7)
         scroll.setWidget(container)
         return scroll, container, layout
@@ -395,6 +404,10 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.adapters_empty_label)
 
         self.adapters_list_container = QWidget(container)
+        self.adapters_list_container.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Preferred,
+        )
         self.adapters_list_layout = QVBoxLayout(self.adapters_list_container)
         self.adapters_list_layout.setContentsMargins(0, 0, 0, 0)
         self.adapters_list_layout.setSpacing(7)
@@ -769,8 +782,8 @@ class MainWindow(QMainWindow):
         out_header.setContentsMargins(0, 6, 0, 0)
         out_title = QLabel("SALIDA DE DIAGNÓSTICO", container)
         out_title.setObjectName("SubgroupTitle")
-        out_header.addWidget(out_title)
-        out_header.addStretch()
+        out_title.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        out_header.addWidget(out_title, stretch=1)
 
         expand_btn = QPushButton("Ampliar", container)
         expand_btn.setToolTip("Abrir la salida actual en una ventana modal más grande")
