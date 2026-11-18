@@ -21,10 +21,11 @@ if (-not $repoPath) {
 Set-Location $repoPath
 Write-Host "=== Sincronizando repositorio en: $repoPath ===" -ForegroundColor Cyan
 
-# 1. Asegurar identidad local
-if ((git config user.email) -ne "owenntrip@gmail.com") {
+# 1. Asegurar identidad local compatible con privacidad de GitHub
+$noreplyEmail = "280557745+owenenriqq@users.noreply.github.com"
+if ((git config user.email) -ne $noreplyEmail) {
     git config user.name "Owen Enrique"
-    git config user.email "owenntrip@gmail.com"
+    git config user.email $noreplyEmail
 }
 
 # 2. Revisar cambios sin commitear
