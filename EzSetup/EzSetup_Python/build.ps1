@@ -19,6 +19,12 @@ if (Test-Path (Join-Path $ProjectRoot "dist")) { Remove-Item (Join-Path $Project
     --uac-admin `
     --name "EzSetup" `
     --icon "assets\EzSetup.ico" `
+    --exclude-module PyQt6.QtWebEngineCore `
+    --exclude-module PyQt6.QtWebEngineWidgets `
+    --exclude-module PyQt6.QtMultimedia `
+    --exclude-module PyQt6.Qt3DCore `
+    --exclude-module PyQt6.QtQml `
+    --exclude-module PyQt6.QtQuick `
     --add-data "config.json;." `
     --add-data "assets;assets" `
     "main.py"

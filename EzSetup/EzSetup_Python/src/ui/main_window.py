@@ -2,11 +2,25 @@
 
 from __future__ import annotations
 
+import ctypes
 from datetime import datetime
+import os
+import subprocess
+import sys
 from typing import Any, Callable
 
-from PyQt6.QtCore import Qt, QThread, QTimer
-from PyQt6.QtGui import QAction, QCloseEvent, QIcon, QKeySequence, QShortcut
+from PyQt6.QtCore import QPointF, QSize, Qt, QThread, QTimer
+from PyQt6.QtGui import (
+    QAction,
+    QBrush,
+    QCloseEvent,
+    QColor,
+    QIcon,
+    QKeySequence,
+    QPainter,
+    QPixmap,
+    QShortcut,
+)
 from PyQt6.QtWidgets import (
     QFrame,
     QHBoxLayout,
@@ -32,17 +46,36 @@ from src.ui.dialogs import CredentialDialog, ProgressDialog
 from src.workers import (
     DownloadWorker,
     FileCopyWorker,
+    InstalledSoftwareCheckWorker,
     IsoMountWorker,
     ServerCheckWorker,
     TaskWorker,
+    ZipExtractWorker,
 )
 
 ActionCallback = Callable[[], None]
 ActionWidgetSpec = tuple[str, str, str, ActionCallback]
 
 
+def _create_more_dots_icon(color: str = "#E4E4E7") -> QIcon:
+    """Dibuja vectorialmente un ícono de 3 puntos verticales centrado (⋮)."""
+    pixmap = QPixmap(18, 18)
+    pixmap.fill(Qt.GlobalColor.transparent)
+
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+    painter.setPen(Qt.PenStyle.NoPen)
+    painter.setBrush(QBrush(QColor(color)))
+
+    for y in (4.0, 9.0, 14.0):
+        painter.drawEllipse(QPointF(9.0, y), 1.6, 1.6)
+
+    painter.end()
+    return QIcon(pixmap)
+
+
 class ActionRow(QFrame):
-    """Fila horizontal compacta con título, badge opcional, hasta 3 botones y menú ▾."""
+    """Fila horizontal compacta con título, badge opcional, hasta 3 botones y menú ⋮."""
 
     def __init__(
         self,
@@ -61,11 +94,11 @@ class ActionRow(QFrame):
         layout.setContentsMargins(14, 6, 14, 6)
         layout.setSpacing(8)
 
-        title_lbl = QLabel(title)
+        title_lbl = QLabel(title, self)
         title_lbl.setObjectName("RowTitle")
         layout.addWidget(title_lbl)
 
-        self.badge_label = QLabel(badge_text)
+        self.badge_label = QLabel(badge_text, self)
         self.badge_label.setObjectName(badge_style)
         self.badge_label.setVisible(bool(badge_text))
         layout.addWidget(self.badge_label)
@@ -73,38 +106,42 @@ class ActionRow(QFrame):
         layout.addStretch(1)
 
         for text, obj_name, tooltip, handler in visible_actions:
-            btn = QPushButton(text)
+            btn = QPushButton(text, self)
             if obj_name:
                 btn.setObjectName(obj_name)
             if tooltip:
                 btn.setToolTip(tooltip)
-            btn.clicked.connect(handler)
+            btn.clicked.connect(lambda _checked=False, h=handler: h())
             layout.addWidget(btn)
 
         if overflow_actions:
-            more_btn = QPushButton("▾")
+            more_btn = QPushButton("", self)
             more_btn.setObjectName("MoreButton")
+            more_btn.setFixedSize(32, 30)
+            more_btn.setIcon(_create_more_dots_icon())
+            more_btn.setIconSize(QSize(16, 16))
             more_btn.setToolTip("Más acciones")
             menu = QMenu(more_btn)
             for text, _obj_name, tooltip, handler in overflow_actions:
                 act = QAction(text, menu)
                 if tooltip:
                     act.setToolTip(tooltip)
-                act.triggered.connect(handler)
+                act.triggered.connect(lambda _checked=False, h=handler: h())
                 menu.addAction(act)
             more_btn.setMenu(menu)
             layout.addWidget(more_btn)
 
-    def set_badge(self, text: str, style_name: str) -> None:
+    def set_badge(self, text: str, style_name: str, tooltip: str = "") -> None:
         self.badge_label.setText(text)
         self.badge_label.setObjectName(style_name)
+        self.badge_label.setToolTip(tooltip)
         self.badge_label.setVisible(bool(text))
         self.badge_label.style().unpolish(self.badge_label)
         self.badge_label.style().polish(self.badge_label)
 
 
 class MainWindow(QMainWindow):
-    """Ventana principal de EzSetup v2.2."""
+    """Ventana principal de EzSetup v2.3."""
 
     def __init__(self, config: AppConfig, is_admin: bool) -> None:
         super().__init__()
@@ -113,9 +150,12 @@ class MainWindow(QMainWindow):
         self._active_workers: list[QThread] = []
         self._server_badges: dict[str, QLabel] = {}
         self._server_check_worker: ServerCheckWorker | None = None
+        self._install_check_worker: InstalledSoftwareCheckWorker | None = None
         self._dotnet_rows: list[ActionRow] = []
         self._creds_rows: list[ActionRow] = []
-        self._catalog_items: list[tuple[str, str, dict[str, Any]]] = []
+        self._item_rows_by_id: dict[str, list[ActionRow]] = {}
+        self._search_rows_index: list[tuple[str, ActionRow]] = []
+        self._search_empty_label: QLabel | None = None
         self._category_titles: list[str] = []
         self._last_selected_row: int = 0
         self._log_collapsed = True
@@ -127,61 +167,67 @@ class MainWindow(QMainWindow):
         if icon_path.is_file():
             self.setWindowIcon(QIcon(str(icon_path)))
 
+        self._search_timer = QTimer(self)
+        self._search_timer.setSingleShot(True)
+        self._search_timer.setInterval(150)
+        self._search_timer.timeout.connect(self._apply_search_filter)
+
         self._build_ui()
         self._setup_shortcuts()
         self._setup_server_monitor()
         self._rebuild_catalog_views()
         self.append_log(f"[INFO] Configuración cargada: {self.config.source_path}")
         self.check_servers_now()
+        self.check_installed_software_now()
 
     # ------------------------------------------------------------------
     # Construcción de UI
     # ------------------------------------------------------------------
 
     def _build_ui(self) -> None:
-        central = QWidget()
+        central = QWidget(self)
         self.setCentralWidget(central)
         root_layout = QVBoxLayout(central)
         root_layout.setContentsMargins(0, 0, 0, 0)
         root_layout.setSpacing(0)
 
-        root_layout.addWidget(self._create_top_bar())
+        root_layout.addWidget(self._create_top_bar(central))
 
-        self.splitter = QSplitter(Qt.Orientation.Vertical)
+        self.splitter = QSplitter(Qt.Orientation.Vertical, central)
         self.splitter.setChildrenCollapsible(False)
 
-        body = QWidget()
+        body = QWidget(self.splitter)
         body_layout = QHBoxLayout(body)
         body_layout.setContentsMargins(0, 0, 0, 0)
         body_layout.setSpacing(0)
 
-        self.sidebar = QListWidget()
+        self.sidebar = QListWidget(body)
         self.sidebar.setObjectName("SidebarNav")
         self.sidebar.setFixedWidth(220)
         self.sidebar.currentRowChanged.connect(self._on_sidebar_changed)
 
-        content_col = QWidget()
+        content_col = QWidget(body)
         content_layout = QVBoxLayout(content_col)
         content_layout.setContentsMargins(0, 0, 0, 0)
         content_layout.setSpacing(0)
 
-        content_layout.addWidget(self._create_content_toolbar())
+        content_layout.addWidget(self._create_content_toolbar(content_col))
 
-        self.stack = QStackedWidget()
+        self.stack = QStackedWidget(content_col)
         content_layout.addWidget(self.stack, stretch=1)
 
         body_layout.addWidget(self.sidebar)
         body_layout.addWidget(content_col, stretch=1)
 
         self.splitter.addWidget(body)
-        self.splitter.addWidget(self._create_log_panel())
+        self.splitter.addWidget(self._create_log_panel(self.splitter))
         self.splitter.setStretchFactor(0, 1)
         self.splitter.setStretchFactor(1, 0)
 
         root_layout.addWidget(self.splitter, stretch=1)
 
-    def _create_top_bar(self) -> QFrame:
-        bar = QFrame()
+    def _create_top_bar(self, parent: QWidget) -> QFrame:
+        bar = QFrame(parent)
         bar.setObjectName("TopBar")
         bar.setFixedHeight(48)
 
@@ -189,37 +235,41 @@ class MainWindow(QMainWindow):
         layout.setContentsMargins(16, 6, 16, 6)
         layout.setSpacing(8)
 
-        self.header_title_lbl = QLabel()
+        self.header_title_lbl = QLabel(bar)
         self.header_title_lbl.setObjectName("AppTitle")
         layout.addWidget(self.header_title_lbl)
 
         layout.addStretch()
 
-        admin_badge = QLabel("Administrador" if self.is_admin else "Sin UAC")
-        admin_badge.setObjectName("AdminBadgeOk" if self.is_admin else "AdminBadgeWarn")
-        layout.addWidget(admin_badge)
+        if self.is_admin:
+            admin_badge = QLabel("Administrador", bar)
+            admin_badge.setObjectName("AdminBadgeOk")
+            layout.addWidget(admin_badge)
+        else:
+            admin_btn = QPushButton("Sin UAC", bar)
+            admin_btn.setObjectName("AdminBadgeWarnBtn")
+            admin_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            admin_btn.setToolTip("Clic para reiniciar como Administrador")
+            admin_btn.clicked.connect(lambda _checked=False: self._relaunch_as_admin())
+            layout.addWidget(admin_btn)
 
         self.server_badges_layout = QHBoxLayout()
         self.server_badges_layout.setSpacing(6)
         layout.addLayout(self.server_badges_layout)
 
-        self.refresh_net_btn = QPushButton("Verificar Red")
+        self.refresh_net_btn = QPushButton("Verificar Red", bar)
         self.refresh_net_btn.setToolTip("Comprobar conectividad TCP/SMB con los servidores configurados")
         self.refresh_net_btn.clicked.connect(self.check_servers_now)
         layout.addWidget(self.refresh_net_btn)
 
-        self.reload_cfg_btn = QPushButton("Recargar Config")
-        self.reload_cfg_btn.setToolTip("Releer config.json y reconstruir las vistas sin reiniciar")
-        self.reload_cfg_btn.clicked.connect(self._reload_config)
-        layout.addWidget(self.reload_cfg_btn)
-
+        self._top_bar = bar
         self._sync_header_metadata()
         return bar
 
     def _sync_header_metadata(self) -> None:
         app_cfg = self.config.app
-        self.setWindowTitle(f"{app_cfg['title']} v{app_cfg['version']}")
-        self.header_title_lbl.setText(f"{app_cfg['name']} v{app_cfg['version']}")
+        self.setWindowTitle(f"{app_cfg['name']} v{app_cfg['version']}")
+        self.header_title_lbl.setText(str(app_cfg["name"]))
 
         while self.server_badges_layout.count():
             item = self.server_badges_layout.takeAt(0)
@@ -229,15 +279,15 @@ class MainWindow(QMainWindow):
         self._server_badges.clear()
 
         for server_id, info in self.config.get_servers().items():
-            badge = QLabel(f"● {info['host']}")
+            badge = QLabel(f"● {info['host']}", self._top_bar)
             badge.setProperty("statusRole", "serverBadge")
             badge.setProperty("statusState", "checking")
             badge.setToolTip(f"{info.get('label', server_id)} — {info.get('unc_root', info['host'])}")
             self._server_badges[server_id] = badge
             self.server_badges_layout.addWidget(badge)
 
-    def _create_content_toolbar(self) -> QFrame:
-        toolbar = QFrame()
+    def _create_content_toolbar(self, parent: QWidget) -> QFrame:
+        toolbar = QFrame(parent)
         toolbar.setObjectName("ContentToolbar")
         toolbar.setFixedHeight(44)
 
@@ -245,24 +295,24 @@ class MainWindow(QMainWindow):
         layout.setContentsMargins(18, 6, 18, 6)
         layout.setSpacing(12)
 
-        self.section_header_label = QLabel("")
+        self.section_header_label = QLabel("", toolbar)
         self.section_header_label.setObjectName("PageHeader")
         layout.addWidget(self.section_header_label)
 
         layout.addStretch()
 
-        self.search_input = QLineEdit()
+        self.search_input = QLineEdit(toolbar)
         self.search_input.setObjectName("SearchInput")
         self.search_input.setFixedWidth(250)
         self.search_input.setClearButtonEnabled(True)
         self.search_input.setPlaceholderText("Buscar herramienta... (Ctrl+F)")
-        self.search_input.textChanged.connect(self._on_search_changed)
+        self.search_input.textChanged.connect(self._on_search_text_edited)
         layout.addWidget(self.search_input)
 
         return toolbar
 
-    def _create_log_panel(self) -> QFrame:
-        panel = QFrame()
+    def _create_log_panel(self, parent: QWidget) -> QFrame:
+        panel = QFrame(parent)
         panel.setObjectName("LogPanel")
         layout = QVBoxLayout(panel)
         layout.setContentsMargins(12, 5, 12, 6)
@@ -270,29 +320,29 @@ class MainWindow(QMainWindow):
 
         header = QHBoxLayout()
         header.setSpacing(8)
-        title = QLabel("Registro:")
+        title = QLabel("Registro:", panel)
         title.setObjectName("LogHeaderLabel")
         header.addWidget(title)
 
-        self.last_log_label = QLabel("Listo")
+        self.last_log_label = QLabel("Listo", panel)
         self.last_log_label.setObjectName("LastLogEvent")
         header.addWidget(self.last_log_label, stretch=1)
 
-        self.active_task_label = QLabel("")
+        self.active_task_label = QLabel("", panel)
         self.active_task_label.setObjectName("RowBadgeMuted")
         self.active_task_label.setVisible(False)
         header.addWidget(self.active_task_label)
 
-        clear_btn = QPushButton("Limpiar")
+        clear_btn = QPushButton("Limpiar", panel)
         clear_btn.clicked.connect(self._clear_logs)
         header.addWidget(clear_btn)
 
-        self.toggle_log_btn = QPushButton("Mostrar Log")
+        self.toggle_log_btn = QPushButton("Mostrar Log", panel)
         self.toggle_log_btn.clicked.connect(self._toggle_log_panel)
         header.addWidget(self.toggle_log_btn)
         layout.addLayout(header)
 
-        self.log_output = QPlainTextEdit()
+        self.log_output = QPlainTextEdit(panel)
         self.log_output.setObjectName("LogOutput")
         self.log_output.setReadOnly(True)
         self.log_output.setVisible(False)
@@ -305,6 +355,8 @@ class MainWindow(QMainWindow):
     def _setup_shortcuts(self) -> None:
         self._search_shortcut = QShortcut(QKeySequence("Ctrl+F"), self)
         self._search_shortcut.activated.connect(self._focus_search)
+        self._reload_shortcut = QShortcut(QKeySequence("F5"), self)
+        self._reload_shortcut.activated.connect(self._reload_config)
 
     def _focus_search(self) -> None:
         self.search_input.setFocus()
@@ -331,56 +383,82 @@ class MainWindow(QMainWindow):
 
     def _rebuild_catalog_views(self) -> None:
         previous_row = self._last_selected_row
+        self.stack.setUpdatesEnabled(False)
         self.sidebar.blockSignals(True)
-        self.sidebar.clear()
+        try:
+            self.sidebar.clear()
 
-        while self.stack.count():
-            widget = self.stack.widget(0)
-            self.stack.removeWidget(widget)
-            widget.deleteLater()
+            while self.stack.count():
+                widget = self.stack.widget(0)
+                self.stack.removeWidget(widget)
+                widget.deleteLater()
 
-        self._dotnet_rows.clear()
-        self._creds_rows.clear()
-        self._catalog_items.clear()
-        self._category_titles.clear()
+            self._dotnet_rows.clear()
+            self._creds_rows.clear()
+            self._item_rows_by_id.clear()
+            self._search_rows_index.clear()
+            self._category_titles.clear()
 
-        for menu_item in self.config.menus:
-            menu_id = str(menu_item["id"])
-            title = str(menu_item["title"])
+            search_scroll, search_container, search_layout = self._create_scroll_container()
+            self._search_page_scroll = search_scroll
+            self._search_empty_label = QLabel(
+                "No se encontraron herramientas que coincidan con la búsqueda.",
+                search_container,
+            )
+            self._search_empty_label.setObjectName("LastLogEvent")
+            self._search_empty_label.setVisible(False)
+            search_layout.addWidget(self._search_empty_label)
 
-            list_item = QListWidgetItem(title)
-            list_item.setData(Qt.ItemDataRole.UserRole, menu_id)
-            self.sidebar.addItem(list_item)
-            self._category_titles.append(title)
+            for menu_item in self.config.menus:
+                menu_id = str(menu_item["id"])
+                title = str(menu_item["title"])
 
-            page = self._build_menu_page(title, menu_item.get("subgroups", []))
-            self.stack.addWidget(page)
+                list_item = QListWidgetItem(title)
+                list_item.setData(Qt.ItemDataRole.UserRole, menu_id)
+                self.sidebar.addItem(list_item)
+                self._category_titles.append(title)
 
-        self._search_page_scroll, self._search_results_layout = self._create_scroll_container()
-        self.stack.addWidget(self._search_page_scroll)
+                page = self._build_menu_page(
+                    title,
+                    menu_item.get("subgroups", []),
+                    search_container,
+                    search_layout,
+                )
+                self.stack.addWidget(page)
 
-        self.sidebar.blockSignals(False)
-        if self.sidebar.count() > 0:
-            target_row = previous_row if 0 <= previous_row < self.sidebar.count() else 0
-            self.sidebar.setCurrentRow(target_row)
-            self._last_selected_row = target_row
+            search_layout.addStretch()
+            self.stack.addWidget(self._search_page_scroll)
+
+            if self.sidebar.count() > 0:
+                target_row = previous_row if 0 <= previous_row < self.sidebar.count() else 0
+                self.sidebar.setCurrentRow(target_row)
+                self._last_selected_row = target_row
+        finally:
+            self.sidebar.blockSignals(False)
+            self.stack.setUpdatesEnabled(True)
 
         self._refresh_dotnet_badge()
         self._refresh_creds_badge()
-        self._on_search_changed(self.search_input.text())
+        self._apply_search_filter()
 
-    def _create_scroll_container(self) -> tuple[QScrollArea, QVBoxLayout]:
-        scroll = QScrollArea()
+    def _create_scroll_container(self) -> tuple[QScrollArea, QWidget, QVBoxLayout]:
+        scroll = QScrollArea(self.stack)
         scroll.setWidgetResizable(True)
-        container = QWidget()
+        container = QWidget(scroll)
         layout = QVBoxLayout(container)
         layout.setContentsMargins(18, 10, 18, 14)
         layout.setSpacing(6)
         scroll.setWidget(container)
-        return scroll, layout
+        return scroll, container, layout
 
-    def _build_menu_page(self, category_title: str, subgroups: list[dict[str, Any]]) -> QScrollArea:
-        scroll, layout = self._create_scroll_container()
+    def _build_menu_page(
+        self,
+        category_title: str,
+        subgroups: list[dict[str, Any]],
+        search_container: QWidget,
+        search_layout: QVBoxLayout,
+    ) -> QScrollArea:
+        scroll, container, layout = self._create_scroll_container()
 
         for subgroup in subgroups:
             sub_title = str(subgroup.get("title", "")).strip()
@@ -390,13 +468,23 @@ class MainWindow(QMainWindow):
             for item in items:
                 if self._should_hide_item(item):
                     continue
-                row = self._build_item_row(item)
+                row = self._build_item_row(item, parent=container)
                 visible_rows.append(row)
-                self._catalog_items.append((category_title, sub_title, item))
+
+                # Pre-crear fila de búsqueda fija con parent explícito para evitar popups o parpadeo
+                search_row = self._build_item_row(
+                    item,
+                    override_badge=category_title,
+                    parent=search_container,
+                )
+                search_row.setVisible(False)
+                search_layout.addWidget(search_row)
+                blob = f"{item.get('title', '')} {category_title} {sub_title}".lower()
+                self._search_rows_index.append((blob, search_row))
 
             if visible_rows:
                 if sub_title:
-                    sub_lbl = QLabel(sub_title)
+                    sub_lbl = QLabel(sub_title, container)
                     sub_lbl.setObjectName("SubgroupTitle")
                     layout.addWidget(sub_lbl)
                 for row in visible_rows:
@@ -421,8 +509,14 @@ class MainWindow(QMainWindow):
                 return True
         return False
 
-    def _build_item_row(self, item: dict[str, Any], override_badge: str = "") -> ActionRow:
+    def _build_item_row(
+        self,
+        item: dict[str, Any],
+        override_badge: str = "",
+        parent: QWidget | None = None,
+    ) -> ActionRow:
         title = str(item["title"])
+        item_id = str(item.get("id", ""))
         actions: list[dict[str, Any]] = list(item.get("actions", []))
 
         specs: list[ActionWidgetSpec] = []
@@ -433,9 +527,13 @@ class MainWindow(QMainWindow):
             handler = self._make_action_handler(title, act)
             specs.append((label, style, tooltip, handler))
 
-        max_visible = min(3, int(item.get("primary_count", 3)))
-        visible = specs[:max_visible]
-        overflow = specs[max_visible:]
+        primary_count = min(3, int(item.get("primary_count", 3)))
+        if len(specs) <= primary_count:
+            visible = specs
+            overflow: list[ActionWidgetSpec] = []
+        else:
+            visible = specs[:primary_count]
+            overflow = specs[primary_count:]
 
         badge_text = override_badge or str(item.get("badge", ""))
         badge_style = "RowBadgeMuted" if override_badge else str(item.get("badge_style", "RowBadgeMuted"))
@@ -446,10 +544,13 @@ class MainWindow(QMainWindow):
             overflow_actions=overflow,
             badge_text=badge_text,
             badge_style=badge_style,
+            parent=parent,
         )
 
-        status_source = str(item.get("status_source", ""))
         if not override_badge:
+            if item_id:
+                self._item_rows_by_id.setdefault(item_id, []).append(row)
+            status_source = str(item.get("status_source", ""))
             if status_source == "dotnet35":
                 self._dotnet_rows.append(row)
             elif status_source == "credentials_enc":
@@ -483,7 +584,11 @@ class MainWindow(QMainWindow):
         if not confirm_msg:
             return handler
 
-        def _confirmed_handler(cb: ActionCallback = handler, title: str = item_title, msg: str = confirm_msg) -> None:
+        def _confirmed_handler(
+            cb: ActionCallback = handler,
+            title: str = item_title,
+            msg: str = confirm_msg,
+        ) -> None:
             reply = QMessageBox.question(
                 self,
                 title,
@@ -508,7 +613,7 @@ class MainWindow(QMainWindow):
             args = list(act.get("args", []))
             return lambda p=path, a=args, lbl=full_label: self._run_task(
                 lbl,
-                lambda _cfg, log: system_tasks.run_generic_exe(p, lbl, a or None, log),
+                lambda cfg, log: system_tasks.run_generic_exe(p, lbl, a or None, log, config=cfg),
             )
 
         if act_type == "msi":
@@ -516,7 +621,7 @@ class MainWindow(QMainWindow):
             args = list(act.get("args", []))
             return lambda p=path, a=args, lbl=full_label: self._run_task(
                 lbl,
-                lambda _cfg, log: system_tasks.run_generic_msi(p, lbl, a or None, log),
+                lambda cfg, log: system_tasks.run_generic_msi(p, lbl, a or None, log, config=cfg),
             )
 
         if act_type == "iso":
@@ -529,14 +634,14 @@ class MainWindow(QMainWindow):
             args = list(act.get("args", []))
             return lambda p=path, a=args, lbl=full_label: self._run_task(
                 lbl,
-                lambda _cfg, log: system_tasks.run_generic_ps1(p, lbl, a or None, log),
+                lambda cfg, log: system_tasks.run_generic_ps1(p, lbl, a or None, log, config=cfg),
             )
 
         if act_type == "reg":
             path = str(act.get("path", ""))
             return lambda p=path, lbl=full_label: self._run_task(
                 lbl,
-                lambda _cfg, log: system_tasks.run_generic_reg(p, lbl, log),
+                lambda cfg, log: system_tasks.run_generic_reg(p, lbl, log, config=cfg),
             )
 
         if act_type == "copy":
@@ -570,6 +675,8 @@ class MainWindow(QMainWindow):
                 return self._run_sistema_contable_combo
             if task_name == "copy_eidico_prueba":
                 return self._start_copy_eidico_prueba
+            if task_name == "extract_produccion_zip":
+                return self._start_extract_produccion_zip
             if task_name == "open_credentials_dialog":
                 return self._open_credentials_dialog
             if task_name == "refresh_dotnet35_status":
@@ -586,51 +693,50 @@ class MainWindow(QMainWindow):
         )
 
     # ------------------------------------------------------------------
-    # Buscador en tiempo real y recarga en caliente
+    # Buscador sin parpadeo (debounce 150ms) y recarga en caliente
     # ------------------------------------------------------------------
 
     def _on_sidebar_changed(self, row: int) -> None:
         if row < 0 or row >= len(self._category_titles):
             return
         self._last_selected_row = row
-        if self.search_input.text().strip():
+        self._search_timer.stop()
+        if self.search_input.text():
+            self.search_input.blockSignals(True)
             self.search_input.clear()
+            self.search_input.blockSignals(False)
         self.stack.setCurrentIndex(row)
         self.section_header_label.setText(self._category_titles[row])
 
-    def _on_search_changed(self, text: str) -> None:
-        query = text.strip().lower()
-        if not query:
-            if 0 <= self._last_selected_row < len(self._category_titles):
-                self.stack.setCurrentIndex(self._last_selected_row)
-                self.section_header_label.setText(self._category_titles[self._last_selected_row])
-            return
+    def _on_search_text_edited(self, _text: str) -> None:
+        self._search_timer.start()
 
-        while self._search_results_layout.count():
-            item = self._search_results_layout.takeAt(0)
-            widget = item.widget()
-            if widget is not None:
-                widget.deleteLater()
+    def _apply_search_filter(self) -> None:
+        raw_text = self.search_input.text().strip()
+        query = raw_text.lower()
 
-        matches = [
-            (cat, sub, item)
-            for cat, sub, item in self._catalog_items
-            if query in str(item.get("title", "")).lower()
-            or query in cat.lower()
-            or query in sub.lower()
-        ]
+        self.stack.setUpdatesEnabled(False)
+        try:
+            if not query:
+                if 0 <= self._last_selected_row < len(self._category_titles):
+                    self.stack.setCurrentIndex(self._last_selected_row)
+                    self.section_header_label.setText(self._category_titles[self._last_selected_row])
+                return
 
-        self.section_header_label.setText(f"Búsqueda: \"{text.strip()}\" ({len(matches)})")
-        if not matches:
-            empty_lbl = QLabel("No se encontraron herramientas que coincidan con la búsqueda.")
-            empty_lbl.setObjectName("LastLogEvent")
-            self._search_results_layout.addWidget(empty_lbl)
-        else:
-            for cat, _sub, item in matches:
-                self._search_results_layout.addWidget(self._build_item_row(item, override_badge=cat))
+            matches_count = 0
+            for blob, row in self._search_rows_index:
+                matched = query in blob
+                row.setVisible(matched)
+                if matched:
+                    matches_count += 1
 
-        self._search_results_layout.addStretch()
-        self.stack.setCurrentWidget(self._search_page_scroll)
+            if self._search_empty_label is not None:
+                self._search_empty_label.setVisible(matches_count == 0)
+
+            self.section_header_label.setText(f'Búsqueda: "{raw_text}" ({matches_count})')
+            self.stack.setCurrentWidget(self._search_page_scroll)
+        finally:
+            self.stack.setUpdatesEnabled(True)
 
     def _reload_config(self) -> None:
         try:
@@ -647,10 +753,11 @@ class MainWindow(QMainWindow):
             self._server_timer.setInterval(interval)
         self._rebuild_catalog_views()
         self.check_servers_now()
+        self.check_installed_software_now()
         self.append_log(f"[OK] Configuración recargada en caliente: {self.config.source_path}")
 
     # ------------------------------------------------------------------
-    # Monitoreo de red, badges y ejecución de workers
+    # Monitoreo de red, detección de software instalado y workers
     # ------------------------------------------------------------------
 
     def _setup_server_monitor(self) -> None:
@@ -687,6 +794,48 @@ class MainWindow(QMainWindow):
             badge.style().polish(badge)
         self._refresh_creds_badge()
 
+    def check_installed_software_now(self) -> None:
+        if self._install_check_worker and self._install_check_worker.isRunning():
+            return
+        worker = InstalledSoftwareCheckWorker(self.config)
+        worker.status_ready.connect(self._on_installed_software_status)
+        self._install_check_worker = worker
+        worker.start()
+
+    def _on_installed_software_status(self, results: dict[str, dict[str, Any]]) -> None:
+        for item_id, info in results.items():
+            if not isinstance(info, dict) or not info.get("installed"):
+                continue
+            ver = str(info.get("version", "")).strip()
+            tooltip = f"Instalado (v{ver})" if ver else "Instalado en el equipo"
+            for row in self._item_rows_by_id.get(item_id, []):
+                row.set_badge("Instalado", "RowBadgeOk", tooltip=tooltip)
+
+    def _relaunch_as_admin(self) -> None:
+        if os.name != "nt":
+            return
+        extra_args = [arg for arg in sys.argv[1:] if arg != "--no-elevate"]
+        if getattr(sys, "frozen", False):
+            executable = sys.executable
+            params = subprocess.list2cmdline(extra_args)
+        else:
+            executable = sys.executable
+            entry_script = str(self.config.source_path.parent / "main.py")
+            params = subprocess.list2cmdline([entry_script, *extra_args])
+
+        result = ctypes.windll.shell32.ShellExecuteW(
+            None,
+            "runas",
+            executable,
+            params,
+            None,
+            1,
+        )
+        if int(result) > 32:
+            self.close()
+        else:
+            self.append_log("[ADVERTENCIA] No se completó la elevación UAC.")
+
     def _refresh_dotnet_badge(self) -> None:
         if not self._dotnet_rows:
             return
@@ -703,7 +852,7 @@ class MainWindow(QMainWindow):
         enc_path = self.config.resolve_credentials_enc_path()
         for row in self._creds_rows:
             if enc_path is not None:
-                row.set_badge(f"Cifrado: {enc_path.name}", "RowBadgeOk")
+                row.set_badge("Almacén Cifrado", "RowBadgeOk")
             else:
                 row.set_badge("Modo manual", "RowBadgeMuted")
 
@@ -724,6 +873,7 @@ class MainWindow(QMainWindow):
             if not self._active_workers:
                 self.active_task_label.setText("")
                 self.active_task_label.setVisible(False)
+            self.check_installed_software_now()
 
         worker.finished.connect(_cleanup)
 
@@ -733,6 +883,9 @@ class MainWindow(QMainWindow):
         fn: Callable[..., str],
         on_success: Callable[[str], None] | None = None,
     ) -> None:
+        if not callable(fn):
+            self._handle_task_error(label, f"Manejador de tarea inválido: {fn!r}")
+            return
         worker = TaskWorker(fn, self.config)
         worker.log_message.connect(self.append_log)
         worker.finished_success.connect(
@@ -749,7 +902,7 @@ class MainWindow(QMainWindow):
         on_success: Callable[[str], None] | None = None,
     ) -> None:
         self.append_log(f"[COMPLETADO] {label}: {msg}")
-        if on_success:
+        if callable(on_success):
             on_success(msg)
 
     def _handle_task_error(self, label: str, err: str) -> None:
@@ -803,7 +956,12 @@ class MainWindow(QMainWindow):
         chunk_size = int(self.config.app.get("copy_chunk_size_bytes", 65536))
 
         dialog = ProgressDialog("Copiando EidicoPrueba.EXE", f"Transfiriendo hacia {dst}...", self)
-        worker = FileCopyWorker(source=src, destination=dst, chunk_size=chunk_size)
+        worker = FileCopyWorker(
+            source=src,
+            destination=dst,
+            chunk_size=chunk_size,
+            allowed_hosts=self.config.get_allowed_unc_hosts(),
+        )
         worker.progress_changed.connect(dialog.update_progress)
         worker.log_message.connect(self.append_log)
         dialog.cancel_requested.connect(worker.cancel)
@@ -813,8 +971,28 @@ class MainWindow(QMainWindow):
         self._track_worker(worker, "Copia EidicoPrueba.EXE")
         worker.start()
         result = dialog.exec()
-        if result == ProgressDialog.DialogCode.Accepted and on_finished:
+        if result == ProgressDialog.DialogCode.Accepted and callable(on_finished):
             on_finished()
+
+    def _start_extract_produccion_zip(self) -> None:
+        zip_src = str(self.config.get_unc("eidico", "produccion_zip"))
+        dest_dir = self.config.get_local_path("eidico_dir")
+
+        dialog = ProgressDialog("Extrayendo Produccion.zip", f"Descomprimiendo en {dest_dir}...", self)
+        worker = ZipExtractWorker(
+            zip_path=zip_src,
+            dest_dir=dest_dir,
+            allowed_hosts=self.config.get_allowed_unc_hosts(),
+        )
+        worker.progress_changed.connect(dialog.update_progress)
+        worker.log_message.connect(self.append_log)
+        dialog.cancel_requested.connect(worker.cancel)
+        worker.finished_success.connect(lambda _p: dialog.accept())
+        worker.failed.connect(lambda err: self._on_transfer_failed(dialog, "Extraer Produccion.zip", err))
+
+        self._track_worker(worker, "Extracción Produccion.zip")
+        worker.start()
+        dialog.exec()
 
     def _on_transfer_failed(self, dialog: ProgressDialog, label: str, err: str) -> None:
         dialog.reject()
@@ -839,7 +1017,12 @@ class MainWindow(QMainWindow):
         )
 
     def _mount_and_install(self, image_path: str, setup_rel: str, label: str) -> None:
-        worker = IsoMountWorker(image_path=image_path, setup_relative_path=setup_rel, label=label)
+        worker = IsoMountWorker(
+            image_path=image_path,
+            setup_relative_path=setup_rel,
+            label=label,
+            allowed_hosts=self.config.get_allowed_unc_hosts(),
+        )
         worker.log_message.connect(self.append_log)
         worker.finished_success.connect(lambda msg: self.append_log(f"[COMPLETADO] {msg}"))
         worker.failed.connect(lambda err: QMessageBox.warning(self, label, err))
@@ -868,13 +1051,17 @@ class MainWindow(QMainWindow):
         self._run_task("Registro de Credenciales", _apply_all)
 
     def closeEvent(self, event: QCloseEvent) -> None:
+        self._search_timer.stop()
         if hasattr(self, "_server_timer"):
             self._server_timer.stop()
         if self._server_check_worker and self._server_check_worker.isRunning():
             self._server_check_worker.wait(1500)
+        if self._install_check_worker and self._install_check_worker.isRunning():
+            self._install_check_worker.wait(1500)
         for worker in list(self._active_workers):
             if worker.isRunning():
                 if hasattr(worker, "cancel"):
                     getattr(worker, "cancel")()
                 worker.wait(1500)
+        system_tasks.cleanup_registered_temp_dirs(self.append_log)
         super().closeEvent(event)

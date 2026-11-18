@@ -8,11 +8,14 @@ import shutil
 import socket
 import subprocess
 import tempfile
-from typing import Callable
+import threading
+from typing import Any, Callable
 import winreg
 import zipfile
 
 import pythoncom
+import pywintypes
+import win32api
 import win32com.client
 import win32security
 import ntsecuritycon
@@ -22,18 +25,88 @@ from src.config import AppConfig
 LogCallback = Callable[[str], None]
 
 _CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
+_REGISTERED_TEMP_DIRS: set[Path] = set()
+_TEMP_LOCK = threading.Lock()
+UAC_PERMISSION_MSG = "Permisos insuficientes. Ejecutá EzSetup como Administrador (clic en 'Sin UAC')."
+
+
+class UnauthorizedUNCHostError(PermissionError):
+    """Error lanzado cuando una ruta UNC apunta a un host no autorizado en config.json."""
+
+
+def format_task_exception(exc: Exception) -> str:
+    """Traduce errores de permisos de Windows a un mensaje amigable UAC."""
+    if isinstance(exc, UnauthorizedUNCHostError):
+        return str(exc)
+    if isinstance(exc, PermissionError):
+        return UAC_PERMISSION_MSG
+    if isinstance(exc, pywintypes.error) and getattr(exc, "winerror", None) == 5:
+        return UAC_PERMISSION_MSG
+    if isinstance(exc, OSError) and (getattr(exc, "winerror", None) == 5 or exc.errno == 13):
+        return UAC_PERMISSION_MSG
+    return str(exc)
 
 
 def _noop_log(_: str) -> None:
     """Callback por defecto cuando no se provee logger."""
 
 
-def _ensure_unc_exists(path_str: str, label: str) -> Path:
+def register_temp_dir(path: Path) -> Path:
+    """Registra una carpeta temporal para su limpieza automática al cerrar la app."""
+    with _TEMP_LOCK:
+        _REGISTERED_TEMP_DIRS.add(path)
+    return path
+
+
+def unregister_temp_dir(path: Path) -> None:
+    """Elimina una carpeta temporal del registro tras ser limpiada."""
+    with _TEMP_LOCK:
+        _REGISTERED_TEMP_DIRS.discard(path)
+
+
+def cleanup_registered_temp_dirs(log: LogCallback = _noop_log) -> int:
+    """Limpia cualquier carpeta temporal registrada que permanezca en disco."""
+    with _TEMP_LOCK:
+        targets = list(_REGISTERED_TEMP_DIRS)
+        _REGISTERED_TEMP_DIRS.clear()
+
+    cleaned = 0
+    for target in targets:
+        try:
+            if target.exists():
+                shutil.rmtree(target, ignore_errors=True)
+                cleaned += 1
+                log(f"[INFO] Carpeta temporal limpiada al cerrar: {target}")
+        except OSError:
+            pass
+    return cleaned
+
+
+def validate_unc_host(path_str: str, allowed_hosts: set[str]) -> None:
+    """Valida que toda ruta UNC pertenezca a un host autorizado en config.json."""
+    normalized = path_str.strip()
+    if not normalized.startswith("\\\\"):
+        return
+    remainder = normalized.lstrip("\\")
+    host = remainder.split("\\", 1)[0].strip().lower()
+    if not host or host not in allowed_hosts:
+        raise UnauthorizedUNCHostError(
+            f"Host UNC no autorizado por config.json: '{host or normalized}'"
+        )
+
+
+def _ensure_unc_exists(
+    path_str: str,
+    label: str,
+    config: AppConfig | None = None,
+) -> Path:
     if not path_str or not path_str.strip():
         raise ValueError(
             f"La ruta de '{label}' está vacía en config.json. "
             "Completala antes de ejecutar esta tarea."
         )
+    if config is not None:
+        validate_unc_host(path_str, config.get_allowed_unc_hosts())
     path = Path(path_str)
     if not path.exists():
         raise FileNotFoundError(
@@ -49,6 +122,7 @@ def _launch_detached(executable: Path | str, args: list[str] | None = None, cwd:
     subprocess.Popen(
         cmd,
         cwd=str(cwd) if cwd else None,
+        shell=False,
         close_fds=True,
     )
 
@@ -92,6 +166,7 @@ def register_server_credential(
             cmd,
             capture_output=True,
             text=True,
+            shell=False,
             creationflags=_CREATE_NO_WINDOW,
         )
 
@@ -100,6 +175,7 @@ def register_server_credential(
         ["cmdkey", f"/add:{host}", f"/user:{clean_user}", f"/pass:{password}"],
         capture_output=True,
         text=True,
+        shell=False,
         creationflags=_CREATE_NO_WINDOW,
     )
     if result.returncode != 0:
@@ -124,6 +200,8 @@ def _create_desktop_shortcut(
     shortcut_path = desktop_dir / shortcut_cfg["name"]
 
     pythoncom.CoInitialize()
+    shell = None
+    shortcut = None
     try:
         shell = win32com.client.Dispatch("WScript.Shell")
         shortcut = shell.CreateShortcut(str(shortcut_path))
@@ -134,6 +212,8 @@ def _create_desktop_shortcut(
             shortcut.IconLocation = icon
         shortcut.Save()
     finally:
+        shortcut = None
+        shell = None
         pythoncom.CoUninitialize()
 
     log(f"[OK] Acceso directo creado en Escritorio: {shortcut_path.name}")
@@ -157,6 +237,7 @@ def run_fox_installer_lan(config: AppConfig, log: LogCallback = _noop_log) -> st
     installer = _ensure_unc_exists(
         config.get_unc("eidico", "fox_installer_exe"),
         "Instalador Sistema Contable Fox",
+        config=config,
     )
     log(f"[INFO] Ejecutando instalador: {installer}")
     _launch_detached(installer, cwd=installer.parent)
@@ -184,12 +265,16 @@ def fix_eidico_shortcut(config: AppConfig, log: LogCallback = _noop_log) -> str:
 
     log(f"[INFO] Actualizando 'Iniciar en' de {lnk_path} -> {workdir}")
     pythoncom.CoInitialize()
+    shell = None
+    shortcut = None
     try:
         shell = win32com.client.Dispatch("WScript.Shell")
         shortcut = shell.CreateShortcut(str(lnk_path))
         shortcut.WorkingDirectory = workdir
         shortcut.Save()
     finally:
+        shortcut = None
+        shell = None
         pythoncom.CoUninitialize()
 
     log("[OK] Campo 'Iniciar en' de Eidico.lnk actualizado correctamente.")
@@ -249,7 +334,11 @@ def set_sol_sistemas_permissions(config: AppConfig, log: LogCallback = _noop_log
 
 def copy_eidico_vbs(config: AppConfig, log: LogCallback = _noop_log) -> str:
     """Copia EIDICO.vbs a la carpeta local de EIDICO."""
-    source = _ensure_unc_exists(config.get_unc("eidico", "eidico_vbs"), "EIDICO.vbs")
+    source = _ensure_unc_exists(
+        config.get_unc("eidico", "eidico_vbs"),
+        "EIDICO.vbs",
+        config=config,
+    )
     dest_dir = config.get_local_path("eidico_dir")
     dest_dir.mkdir(parents=True, exist_ok=True)
     dest_file = dest_dir / source.name
@@ -265,6 +354,7 @@ def extract_produccion_zip(config: AppConfig, log: LogCallback = _noop_log) -> s
     zip_path = _ensure_unc_exists(
         config.get_unc("eidico", "produccion_zip"),
         "Produccion.zip",
+        config=config,
     )
     dest_dir = config.get_local_path("eidico_dir")
     dest_dir.mkdir(parents=True, exist_ok=True)
@@ -303,6 +393,7 @@ def import_reg_file(reg_path: Path, log: LogCallback = _noop_log) -> None:
         ["regedit.exe", "/s", str(reg_path)],
         capture_output=True,
         text=True,
+        shell=False,
         creationflags=_CREATE_NO_WINDOW,
     )
     if result.returncode != 0:
@@ -327,34 +418,38 @@ def process_forticlient_zip(
         raise FileNotFoundError(f"No se encontró el paquete ZIP de FortiClient: {zip_path}")
 
     with tempfile.TemporaryDirectory(prefix="ezsetup_forti_") as tmp_dir:
-        tmp_path = Path(tmp_dir)
-        log(f"[INFO] Extrayendo paquete FortiClient en carpeta temporal...")
-        with zipfile.ZipFile(zip_path, "r") as zf:
-            if install_msi and msi_name:
-                extracted_msi = _extract_zip_member(zf, msi_name, tmp_path)
-                if extracted_msi and extracted_msi.is_file():
-                    log(f"[INFO] Ejecutando instalador MSI: {extracted_msi.name}")
-                    proc = subprocess.run(
-                        ["msiexec.exe", "/i", str(extracted_msi)],
-                        cwd=str(extracted_msi.parent),
-                    )
-                    if proc.returncode not in (0, 3010):
-                        log(
-                            f"[ADVERTENCIA] El instalador MSI finalizó con código {proc.returncode}."
+        tmp_path = register_temp_dir(Path(tmp_dir))
+        try:
+            log("[INFO] Extrayendo paquete FortiClient en carpeta temporal...")
+            with zipfile.ZipFile(zip_path, "r") as zf:
+                if install_msi and msi_name:
+                    extracted_msi = _extract_zip_member(zf, msi_name, tmp_path)
+                    if extracted_msi and extracted_msi.is_file():
+                        log(f"[INFO] Ejecutando instalador MSI: {extracted_msi.name}")
+                        proc = subprocess.run(
+                            ["msiexec.exe", "/i", str(extracted_msi)],
+                            cwd=str(extracted_msi.parent),
+                            shell=False,
                         )
+                        if proc.returncode not in (0, 3010):
+                            log(
+                                f"[ADVERTENCIA] El instalador MSI finalizó con código {proc.returncode}."
+                            )
+                        else:
+                            log("[OK] Instalador MSI de FortiClient finalizado.")
+                        msi_ran = True
                     else:
-                        log("[OK] Instalador MSI de FortiClient finalizado.")
-                    msi_ran = True
-                else:
-                    log(f"[ADVERTENCIA] No se encontró '{msi_name}' dentro de {zip_path.name}.")
+                        log(f"[ADVERTENCIA] No se encontró '{msi_name}' dentro de {zip_path.name}.")
 
-            if import_reg and reg_name:
-                extracted_reg = _extract_zip_member(zf, reg_name, tmp_path)
-                if extracted_reg and extracted_reg.is_file():
-                    import_reg_file(extracted_reg, log)
-                    reg_imported = True
-                else:
-                    log(f"[ADVERTENCIA] No se encontró '{reg_name}' dentro de {zip_path.name}.")
+                if import_reg and reg_name:
+                    extracted_reg = _extract_zip_member(zf, reg_name, tmp_path)
+                    if extracted_reg and extracted_reg.is_file():
+                        import_reg_file(extracted_reg, log)
+                        reg_imported = True
+                    else:
+                        log(f"[ADVERTENCIA] No se encontró '{reg_name}' dentro de {zip_path.name}.")
+        finally:
+            unregister_temp_dir(tmp_path)
 
     log("[INFO] Archivos temporales de FortiClient eliminados.")
     return msi_ran, reg_imported
@@ -365,6 +460,7 @@ def install_forticlient_lan(config: AppConfig, log: LogCallback = _noop_log) -> 
     zip_path = _ensure_unc_exists(
         config.get_unc("eidico", "forticlient_zip"),
         "Paquete FortiClient ZIP",
+        config=config,
     )
     msi_name = str(config.get_unc("eidico", "forticlient_msi_name"))
     msi_ran, _ = process_forticlient_zip(
@@ -386,6 +482,7 @@ def import_forticlient_reg_lan(config: AppConfig, log: LogCallback = _noop_log) 
     zip_path = _ensure_unc_exists(
         config.get_unc("eidico", "forticlient_zip"),
         "Paquete FortiClient ZIP",
+        config=config,
     )
     reg_name = str(config.get_unc("eidico", "forticlient_reg_name"))
     _, reg_imported = process_forticlient_zip(
@@ -407,6 +504,7 @@ def install_and_configure_forticlient_lan(config: AppConfig, log: LogCallback = 
     zip_path = _ensure_unc_exists(
         config.get_unc("eidico", "forticlient_zip"),
         "Paquete FortiClient ZIP",
+        config=config,
     )
     msi_name = str(config.get_unc("eidico", "forticlient_msi_name"))
     reg_name = str(config.get_unc("eidico", "forticlient_reg_name"))
@@ -442,6 +540,7 @@ def install_aws_vpn_lan(config: AppConfig, log: LogCallback = _noop_log) -> str:
     msi_path = _ensure_unc_exists(
         config.get_unc("eidico", "aws_vpn_msi"),
         "AWS VPN Client MSI",
+        config=config,
     )
     log(f"[INFO] Ejecutando msiexec /i {msi_path}")
     _launch_detached("msiexec.exe", ["/i", str(msi_path)])
@@ -449,7 +548,7 @@ def install_aws_vpn_lan(config: AppConfig, log: LogCallback = _noop_log) -> str:
 
 
 # ---------------------------------------------------------------------------
-# .NET Framework 3.5 y WinSCP
+# .NET Framework 3.5, detección de software instalado y WinSCP
 # ---------------------------------------------------------------------------
 
 def check_dotnet35_installed(config: AppConfig) -> bool:
@@ -462,6 +561,119 @@ def check_dotnet35_installed(config: AppConfig) -> bool:
             return int(val) == 1
     except OSError:
         return False
+
+
+def _get_file_version(file_path: Path) -> str:
+    """Lee la versión de un ejecutable/DLL de Windows mediante GetFileVersionInfo."""
+    if os.name != "nt" or not file_path.is_file():
+        return ""
+    try:
+        info = win32api.GetFileVersionInfo(str(file_path), "\\")
+        ms = int(info["FileVersionMS"])
+        ls = int(info["FileVersionLS"])
+        parts = [ms >> 16, ms & 0xFFFF, ls >> 16, ls & 0xFFFF]
+        return ".".join(str(p) for p in parts[:3]) if parts[3] == 0 else ".".join(str(p) for p in parts)
+    except Exception:
+        return ""
+
+
+def _read_reg_str(key: Any, value_name: str) -> str:
+    try:
+        val, _ = winreg.QueryValueEx(key, value_name)
+        return str(val).strip()
+    except OSError:
+        return ""
+
+
+def check_software_installed(config: AppConfig) -> dict[str, dict[str, Any]]:
+    """Verifica en disco, servicios y registro qué programas configurados están instalados."""
+    results: dict[str, dict[str, Any]] = {}
+    uninstall_roots: list[str] = list(config.registry.get("uninstall_roots", []))
+    services_root = str(config.registry.get("services_root", "")).strip()
+
+    for item_id, spec in config.get_install_checks().items():
+        found = False
+        version = ""
+
+        for raw_path in spec.get("paths", []):
+            expanded = os.path.expandvars(str(raw_path))
+            if not expanded:
+                continue
+            candidate = Path(expanded)
+            try:
+                if candidate.exists():
+                    found = True
+                    version = _get_file_version(candidate)
+                    break
+            except OSError:
+                continue
+
+        if os.name == "nt" and services_root:
+            for svc_name in spec.get("services", []):
+                svc_key_path = f"{services_root}\\{svc_name}"
+                try:
+                    with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, svc_key_path, 0, winreg.KEY_READ) as key:
+                        found = True
+                        if not version:
+                            img_path = _read_reg_str(key, "ImagePath").strip('"')
+                            if img_path:
+                                exe_part = img_path.split(".exe", 1)[0] + ".exe" if ".exe" in img_path.lower() else img_path
+                                version = _get_file_version(Path(os.path.expandvars(exe_part)))
+                        break
+                except OSError:
+                    continue
+
+        if os.name == "nt" and (not found or not version):
+            for reg_subkey in spec.get("reg_keys", []):
+                for view_flag in (0, winreg.KEY_WOW64_32KEY):
+                    try:
+                        with winreg.OpenKey(
+                            winreg.HKEY_LOCAL_MACHINE,
+                            str(reg_subkey),
+                            0,
+                            winreg.KEY_READ | view_flag,
+                        ) as key:
+                            found = True
+                            if not version:
+                                version = _read_reg_str(key, "DisplayVersion") or _read_reg_str(key, "Version")
+                            break
+                    except OSError:
+                        continue
+                if found and version:
+                    break
+
+        if os.name == "nt" and spec.get("uninstall_names") and (not found or not version):
+            needles = [str(n).lower() for n in spec.get("uninstall_names", []) if str(n).strip()]
+            for root_hive in (winreg.HKEY_LOCAL_MACHINE, winreg.HKEY_CURRENT_USER):
+                for root_subkey in uninstall_roots:
+                    try:
+                        with winreg.OpenKey(root_hive, root_subkey, 0, winreg.KEY_READ) as root_key:
+                            idx = 0
+                            while True:
+                                try:
+                                    sub_name = winreg.EnumKey(root_key, idx)
+                                    idx += 1
+                                except OSError:
+                                    break
+                                try:
+                                    with winreg.OpenKey(root_key, sub_name, 0, winreg.KEY_READ) as app_key:
+                                        display_name = _read_reg_str(app_key, "DisplayName").lower()
+                                        if display_name and any(n in display_name for n in needles):
+                                            found = True
+                                            if not version:
+                                                version = _read_reg_str(app_key, "DisplayVersion")
+                                            break
+                                except OSError:
+                                    continue
+                    except OSError:
+                        continue
+                    if found and version:
+                        break
+                if found and version:
+                    break
+
+        results[str(item_id)] = {"installed": found, "version": version}
+    return results
 
 
 def open_optional_features(config: AppConfig, log: LogCallback = _noop_log) -> str:
@@ -483,6 +695,7 @@ def install_winscp_lan(config: AppConfig, log: LogCallback = _noop_log) -> str:
     installer = _ensure_unc_exists(
         config.get_unc("eidico", "winscp_installer_exe"),
         "Instalador WinSCP",
+        config=config,
     )
     log(f"[INFO] Ejecutando instalador de WinSCP: {installer}")
     _launch_detached(installer, cwd=installer.parent)
@@ -491,7 +704,11 @@ def install_winscp_lan(config: AppConfig, log: LogCallback = _noop_log) -> str:
 
 def copy_winscp_to_dotnet(config: AppConfig, log: LogCallback = _noop_log) -> str:
     """Copia WinSCPnet.dll y WINSCP.exe a la carpeta .NET Framework v4.0.30319."""
-    source_dir = _ensure_unc_exists(config.get_unc("eidico", "winscp_dir"), "Carpeta WinSCP")
+    source_dir = _ensure_unc_exists(
+        config.get_unc("eidico", "winscp_dir"),
+        "Carpeta WinSCP",
+        config=config,
+    )
     target_dir = config.get_local_path("dotnet_framework_dir")
     if not target_dir.is_dir():
         raise FileNotFoundError(f"No se encontró el directorio .NET: {target_dir}")
@@ -533,6 +750,7 @@ def register_winscp_regasm(config: AppConfig, log: LogCallback = _noop_log) -> s
         cwd=str(framework_dir),
         capture_output=True,
         text=True,
+        shell=False,
         creationflags=_CREATE_NO_WINDOW,
     )
     for line in (result.stdout or "").splitlines():
@@ -565,6 +783,7 @@ def install_openvpn_lan(config: AppConfig, log: LogCallback = _noop_log) -> str:
     installer = _ensure_unc_exists(
         config.get_unc("eidico", "openvpn_installer_exe"),
         "Instalador OpenVPN",
+        config=config,
     )
     log(f"[INFO] Ejecutando instalador de OpenVPN: {installer}")
     _launch_detached(installer, cwd=installer.parent)
@@ -573,7 +792,11 @@ def install_openvpn_lan(config: AppConfig, log: LogCallback = _noop_log) -> str:
 
 def copy_openvpn_configs(config: AppConfig, log: LogCallback = _noop_log) -> str:
     """Copia los certificados y perfiles de configuración a la carpeta config de OpenVPN."""
-    source_dir = _ensure_unc_exists(config.get_unc("eidico", "openvpn_dir"), "Carpeta OpenVPN")
+    source_dir = _ensure_unc_exists(
+        config.get_unc("eidico", "openvpn_dir"),
+        "Carpeta OpenVPN",
+        config=config,
+    )
     dest_dir = config.get_local_path("openvpn_config_dir")
     dest_dir.mkdir(parents=True, exist_ok=True)
 
@@ -592,10 +815,15 @@ def copy_openvpn_configs(config: AppConfig, log: LogCallback = _noop_log) -> str
 
 def install_nitropdf_lan(config: AppConfig, log: LogCallback = _noop_log) -> str:
     """Extrae NitroPDF.zip (omitiendo cualquier patch) y lanza el instalador MSI oficial."""
-    zip_path = _ensure_unc_exists(config.get_unc("eidico", "nitropdf_zip"), "NitroPDF.zip")
+    zip_path = _ensure_unc_exists(
+        config.get_unc("eidico", "nitropdf_zip"),
+        "NitroPDF.zip",
+        config=config,
+    )
     msi_name = str(config.get_unc("eidico", "nitropdf_msi_name"))
     extract_dir = config.get_local_path("nitro_temp_extract_dir")
     extract_dir.mkdir(parents=True, exist_ok=True)
+    register_temp_dir(extract_dir)
 
     log(f"[INFO] Extrayendo instalador de {zip_path} en {extract_dir}...")
     with zipfile.ZipFile(zip_path, "r") as zf:
@@ -621,6 +849,7 @@ def install_nitropdf_lan(config: AppConfig, log: LogCallback = _noop_log) -> str
 def cleanup_nitropdf_temp(config: AppConfig, log: LogCallback = _noop_log) -> str:
     """Elimina la carpeta temporal NitroPDF extraída en el Escritorio."""
     extract_dir = config.get_local_path("nitro_temp_extract_dir")
+    unregister_temp_dir(extract_dir)
     if not extract_dir.exists():
         log(f"[INFO] La carpeta temporal {extract_dir} no existe.")
         return "La carpeta NitroPDF no estaba presente."
@@ -635,6 +864,7 @@ def copy_fondos_eidico(config: AppConfig, log: LogCallback = _noop_log) -> str:
     source_dir = _ensure_unc_exists(
         config.get_unc("eidico", "fondos_eidico_dir"),
         "Fondos Eidico",
+        config=config,
     )
     subdir = config.get_local_path_raw("fondos_eidico_dest_subdir")
     dest_dir = config.get_pictures_dir() / subdir
@@ -654,6 +884,7 @@ def open_autocad_instructions(config: AppConfig, log: LogCallback = _noop_log) -
     txt_path = _ensure_unc_exists(
         config.get_unc("tecnica", "autocad_2021_instructions"),
         "Instructivo AutoCAD 2021",
+        config=config,
     )
     log(f"[INFO] Abriendo instructivo: {txt_path}")
     _launch_detached("notepad.exe", [str(txt_path)])
@@ -760,15 +991,20 @@ def apply_autocad_firewall_block(config: AppConfig, log: LogCallback = _noop_log
 
     log("[INFO] Aplicando reglas de bloqueo en Firewall de Windows para AutoCAD 2021...")
     with tempfile.TemporaryDirectory(prefix="ezsetup_fw_") as tmp_dir:
-        ps1_path = Path(tmp_dir) / "autocad_fw_block.ps1"
-        ps1_path.write_text(ps_script, encoding="utf-8-sig")
+        tmp_path = register_temp_dir(Path(tmp_dir))
+        try:
+            ps1_path = tmp_path / "autocad_fw_block.ps1"
+            ps1_path.write_text(ps_script, encoding="utf-8-sig")
 
-        result = subprocess.run(
-            ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(ps1_path)],
-            capture_output=True,
-            text=True,
-            creationflags=_CREATE_NO_WINDOW,
-        )
+            result = subprocess.run(
+                ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(ps1_path)],
+                capture_output=True,
+                text=True,
+                shell=False,
+                creationflags=_CREATE_NO_WINDOW,
+            )
+        finally:
+            unregister_temp_dir(tmp_path)
 
     summary_line = ""
     for line in (result.stdout or "").splitlines():
@@ -790,9 +1026,14 @@ def apply_autocad_firewall_block(config: AppConfig, log: LogCallback = _noop_log
     return summary_line or "Bloqueo de Firewall para AutoCAD 2021 aplicado."
 
 
-def run_direct_installer(installer_path: str, label: str, log: LogCallback = _noop_log) -> str:
+def run_direct_installer(
+    installer_path: str,
+    label: str,
+    log: LogCallback = _noop_log,
+    config: AppConfig | None = None,
+) -> str:
     """Ejecuta un instalador directo (.exe o .msi) configurado en config.json."""
-    installer = _ensure_unc_exists(installer_path, label)
+    installer = _ensure_unc_exists(installer_path, label, config=config)
     log(f"[INFO] Ejecutando {label}: {installer}")
     if installer.suffix.lower() == ".msi":
         _launch_detached("msiexec.exe", ["/i", str(installer)])
@@ -811,6 +1052,7 @@ def generate_battery_report(config: AppConfig, log: LogCallback = _noop_log) -> 
         ["powercfg", "/batteryreport", "/output", str(report_path)],
         capture_output=True,
         text=True,
+        shell=False,
         creationflags=_CREATE_NO_WINDOW,
     )
     if result.returncode != 0:
@@ -820,7 +1062,8 @@ def generate_battery_report(config: AppConfig, log: LogCallback = _noop_log) -> 
         )
 
     log(f"[OK] Reporte generado: {report_path}")
-    subprocess.Popen(["cmd", "/c", "start", "", str(report_path)], creationflags=_CREATE_NO_WINDOW)
+    if os.name == "nt":
+        os.startfile(str(report_path))
     return f"Reporte de batería abierto: {report_path}"
 
 
@@ -839,6 +1082,7 @@ def renew_ip_and_dns(config: AppConfig, log: LogCallback = _noop_log) -> str:
             cmd,
             capture_output=True,
             text=True,
+            shell=False,
             creationflags=_CREATE_NO_WINDOW,
         )
         if res.returncode != 0:
@@ -854,6 +1098,7 @@ def renew_ip_and_dns(config: AppConfig, log: LogCallback = _noop_log) -> str:
             ["ping", "-n", "1", "-w", "2000", probe_host],
             capture_output=True,
             text=True,
+            shell=False,
             creationflags=_CREATE_NO_WINDOW,
         )
         internet_ok = ping_res.returncode == 0
@@ -906,31 +1151,36 @@ def hdsentinel_replace_exe(config: AppConfig, log: LogCallback = _noop_log) -> s
     zip_path = _ensure_unc_exists(
         str(config.get_unc("diagnostics", "hdsentinel_crack_zip")),
         "Paquete Hard Disk Sentinel",
+        config=config,
     )
     exe_name = str(config.get_unc("diagnostics", "hdsentinel_exe_name"))
     dest_exe = config.get_local_path("hdsentinel_exe_dest")
 
     with tempfile.TemporaryDirectory(prefix="ezsetup_hds_") as tmp_dir:
-        tmp_path = Path(tmp_dir)
-        log(f"[INFO] Extrayendo {exe_name} desde {zip_path}...")
-        with zipfile.ZipFile(zip_path, "r") as zf:
-            extracted = _extract_zip_member(zf, exe_name, tmp_path)
-            if not extracted or not extracted.is_file():
-                raise FileNotFoundError(
-                    f"No se encontró '{exe_name}' dentro de {zip_path.name}."
-                )
+        tmp_path = register_temp_dir(Path(tmp_dir))
+        try:
+            log(f"[INFO] Extrayendo {exe_name} desde {zip_path}...")
+            with zipfile.ZipFile(zip_path, "r") as zf:
+                extracted = _extract_zip_member(zf, exe_name, tmp_path)
+                if not extracted or not extracted.is_file():
+                    raise FileNotFoundError(
+                        f"No se encontró '{exe_name}' dentro de {zip_path.name}."
+                    )
 
-        log(f"[INFO] Verificando cierre de proceso {exe_name}...")
-        subprocess.run(
-            ["taskkill", "/F", "/IM", exe_name],
-            capture_output=True,
-            text=True,
-            creationflags=_CREATE_NO_WINDOW,
-        )
+            log(f"[INFO] Verificando cierre de proceso {exe_name}...")
+            subprocess.run(
+                ["taskkill", "/F", "/IM", exe_name],
+                capture_output=True,
+                text=True,
+                shell=False,
+                creationflags=_CREATE_NO_WINDOW,
+            )
 
-        dest_exe.parent.mkdir(parents=True, exist_ok=True)
-        log(f"[INFO] Copiando {extracted.name} -> {dest_exe}")
-        shutil.copy2(extracted, dest_exe)
+            dest_exe.parent.mkdir(parents=True, exist_ok=True)
+            log(f"[INFO] Copiando {extracted.name} -> {dest_exe}")
+            shutil.copy2(extracted, dest_exe)
+        finally:
+            unregister_temp_dir(tmp_path)
 
     log(f"[OK] {exe_name} actualizado correctamente en {dest_exe}.")
     return f"{exe_name} copiado en {dest_exe}."
@@ -941,9 +1191,10 @@ def run_generic_exe(
     label: str,
     args: list[str] | None = None,
     log: LogCallback = _noop_log,
+    config: AppConfig | None = None,
 ) -> str:
     """Ejecuta un binario .exe configurado en config.json."""
-    exe_path = _ensure_unc_exists(path_str, label)
+    exe_path = _ensure_unc_exists(path_str, label, config=config)
     log(f"[INFO] Ejecutando {label}: {exe_path}")
     _launch_detached(exe_path, args=args, cwd=exe_path.parent)
     return f"{label} iniciado."
@@ -954,18 +1205,24 @@ def run_generic_msi(
     label: str,
     args: list[str] | None = None,
     log: LogCallback = _noop_log,
+    config: AppConfig | None = None,
 ) -> str:
     """Ejecuta un instalador .msi configurado en config.json mediante msiexec."""
-    msi_path = _ensure_unc_exists(path_str, label)
+    msi_path = _ensure_unc_exists(path_str, label, config=config)
     cmd_args = ["/i", str(msi_path), *(args or [])]
     log(f"[INFO] Ejecutando MSI {label}: {msi_path}")
     _launch_detached("msiexec.exe", cmd_args)
     return f"Instalador MSI de {label} iniciado."
 
 
-def run_generic_reg(path_str: str, label: str, log: LogCallback = _noop_log) -> str:
+def run_generic_reg(
+    path_str: str,
+    label: str,
+    log: LogCallback = _noop_log,
+    config: AppConfig | None = None,
+) -> str:
     """Importa silenciosamente un archivo .reg configurado en config.json."""
-    reg_path = _ensure_unc_exists(path_str, label)
+    reg_path = _ensure_unc_exists(path_str, label, config=config)
     import_reg_file(reg_path, log)
     return f"Registro '{reg_path.name}' importado correctamente."
 
@@ -975,9 +1232,10 @@ def run_generic_ps1(
     label: str,
     args: list[str] | None = None,
     log: LogCallback = _noop_log,
+    config: AppConfig | None = None,
 ) -> str:
     """Ejecuta un script .ps1 físico configurado en config.json y registra su salida."""
-    ps1_path = _ensure_unc_exists(path_str, label)
+    ps1_path = _ensure_unc_exists(path_str, label, config=config)
     log(f"[INFO] Ejecutando script PowerShell {label}: {ps1_path}")
     cmd = [
         "powershell",
@@ -992,6 +1250,7 @@ def run_generic_ps1(
         cmd,
         capture_output=True,
         text=True,
+        shell=False,
         creationflags=_CREATE_NO_WINDOW,
     )
     for line in (result.stdout or "").splitlines():
@@ -1014,7 +1273,7 @@ def copy_generic_item(
 ) -> str:
     """Copia un archivo o carpeta configurado en config.json expandiendo variables."""
     src_expanded = os.path.expandvars(source_str)
-    src_path = _ensure_unc_exists(src_expanded, label)
+    src_path = _ensure_unc_exists(src_expanded, label, config=config)
 
     resolved_dest = dest_str
     resolved_dest = resolved_dest.replace("{pictures}", str(config.get_pictures_dir()))

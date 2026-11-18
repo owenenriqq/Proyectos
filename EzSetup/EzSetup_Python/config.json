@@ -1,16 +1,16 @@
 {
   "app": {
     "name": "EzSetup",
-    "version": "2.2.0",
-    "title": "EzSetup - Panel de Instalación y Configuración IT",
-    "app_user_model_id": "Eidico.EzSetup.2.2",
+    "version": "2.4.0",
+    "title": "EzSetup",
+    "app_user_model_id": "Eidico.EzSetup.2.4",
     "copy_chunk_size_bytes": 65536,
     "server_check_interval_ms": 15000,
     "internet_probe_host": "1.1.1.1"
   },
   "servers": {
     "fileserver_principal": {
-      "label": "Fileserver Principal (172.30.0.13)",
+      "label": "Fileserver Benavidez",
       "host": "172.30.0.13",
       "port": 445,
       "unc_root": "\\\\172.30.0.13",
@@ -23,7 +23,7 @@
       }
     },
     "fileserver_aws": {
-      "label": "Fileserver AWS (172.31.11.146)",
+      "label": "Fileserver AWS",
       "host": "172.31.11.146",
       "port": 445,
       "unc_root": "\\\\172.31.11.146\\Fileserver",
@@ -54,7 +54,12 @@
   },
   "registry": {
     "dotnet35_key": "SOFTWARE\\Microsoft\\NET Framework Setup\\NDP\\v3.5",
-    "dotnet35_value": "Install"
+    "dotnet35_value": "Install",
+    "uninstall_roots": [
+      "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall",
+      "SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall"
+    ],
+    "services_root": "SYSTEM\\CurrentControlSet\\Services"
   },
   "security": {
     "users_group_sid": "S-1-5-32-545"
@@ -159,6 +164,7 @@
               "title": "Sistema de Gestión (Fox)",
               "badge": "Suite",
               "badge_style": "RowBadgeOk",
+              "primary_count": 3,
               "actions": [
                 {
                   "label": "Descargar",
@@ -167,23 +173,35 @@
                   "url_key": "sistema_contable_zip"
                 },
                 {
+                  "label": "Configurar Todo",
+                  "style": "SuccessButton",
+                  "type": "task",
+                  "task": "fox_configure_workstation",
+                  "tooltip": "Ejecutar pasos 3, 4, 5 y 6: Acceso Directo, Permisos Sol Sistemas, EIDICO.vbs y EidicoPrueba.exe"
+                },
+                {
                   "label": "Instalar",
                   "style": "PrimaryButton",
                   "type": "exe",
                   "path": "\\\\172.30.0.13\\areas\\0-IT\\Instalar_Fox_EIDICO\\Instalar_Fox.exe"
                 },
                 {
-                  "label": "Configurar Puesto",
-                  "style": "SuccessButton",
+                  "label": "Producción",
                   "type": "task",
-                  "task": "fox_configure_workstation",
-                  "tooltip": "Ejecutar pasos 3, 4, 5 y 6: Acceso Directo, Permisos Sol Sistemas, EIDICO.vbs y EidicoPrueba.EXE"
+                  "task": "extract_produccion_zip",
+                  "tooltip": "Extraer Produccion.zip en carpeta EIDICO"
                 },
                 {
-                  "label": "Acceso Directo",
+                  "label": "EIDICO.vbs",
                   "type": "task",
-                  "task": "fix_eidico_shortcut",
-                  "tooltip": "Corregir 'Iniciar en' de Eidico.lnk"
+                  "task": "copy_eidico_vbs",
+                  "tooltip": "Copiar EIDICO.vbs desde red a carpeta EIDICO"
+                },
+                {
+                  "label": "EidicoPrueba.exe",
+                  "type": "task",
+                  "task": "copy_eidico_prueba",
+                  "tooltip": "Transferir EidicoPrueba.EXE con barra de progreso"
                 },
                 {
                   "label": "Permisos Sol Sistemas",
@@ -192,41 +210,30 @@
                   "tooltip": "Asignar FullControl al grupo Users (S-1-5-32-545) en Sol Sistemas"
                 },
                 {
-                  "label": "Copiar EIDICO.vbs",
+                  "label": "Acceso Directo",
                   "type": "task",
-                  "task": "copy_eidico_vbs",
-                  "tooltip": "Copiar EIDICO.vbs desde red a carpeta EIDICO"
-                },
-                {
-                  "label": "Copiar EidicoPrueba.EXE",
-                  "type": "task",
-                  "task": "copy_eidico_prueba",
-                  "tooltip": "Transferir EidicoPrueba.EXE con barra de progreso"
-                },
-                {
-                  "label": "Extraer Produccion.zip",
-                  "type": "task",
-                  "task": "extract_produccion_zip",
-                  "tooltip": "Extraer Produccion.zip en carpeta EIDICO"
+                  "task": "fix_eidico_shortcut",
+                  "tooltip": "Corregir 'Iniciar en' de Eidico.lnk"
                 }
               ]
             },
             {
               "id": "winscp_com",
               "title": "WinSCP (.NET / COM)",
+              "primary_count": 2,
               "actions": [
+                {
+                  "label": "Configurar Todo",
+                  "style": "SuccessButton",
+                  "type": "task",
+                  "task": "copy_and_register_winscp",
+                  "tooltip": "Copiar WinSCPnet.dll/WINSCP.exe a .NET v4.0.30319 y registrar con RegAsm /codebase /tlb"
+                },
                 {
                   "label": "Instalar",
                   "style": "PrimaryButton",
                   "type": "exe",
                   "path": "\\\\172.30.0.13\\areas\\0-IT\\PMC Instalador WinSCP\\WinSCP-5.13.3-Setup.exe"
-                },
-                {
-                  "label": "Configurar .NET",
-                  "style": "SuccessButton",
-                  "type": "task",
-                  "task": "copy_and_register_winscp",
-                  "tooltip": "Copiar WinSCPnet.dll/WINSCP.exe a .NET v4.0.30319 y registrar con RegAsm"
                 },
                 {
                   "label": "Copiar DLL",
@@ -275,7 +282,23 @@
             {
               "id": "forticlient_vpn",
               "title": "FortiClient VPN",
+              "primary_count": 3,
               "actions": [
+                {
+                  "label": "Descargar",
+                  "style": "",
+                  "type": "url",
+                  "url_key": "forticlient_zip",
+                  "install_embedded_msi": true,
+                  "import_embedded_reg": true
+                },
+                {
+                  "label": "Configurar Todo",
+                  "style": "SuccessButton",
+                  "type": "task",
+                  "task": "install_and_configure_forticlient_lan",
+                  "tooltip": "Extraer paquete ZIP, instalar MSI e importar silenciosamente VPN Config.reg"
+                },
                 {
                   "label": "Instalar",
                   "style": "PrimaryButton",
@@ -284,24 +307,10 @@
                   "tooltip": "Extraer y ejecutar MSI desde FortiClientVPN_7.4.3.6002_EIDICO.zip"
                 },
                 {
-                  "label": "Configurar Todo",
-                  "style": "SuccessButton",
-                  "type": "task",
-                  "task": "install_and_configure_forticlient_lan",
-                  "tooltip": "Instalar MSI e importar silenciosamente VPN Config.reg desde el paquete ZIP"
-                },
-                {
                   "label": "Importar .reg",
                   "type": "task",
                   "task": "import_forticlient_reg_lan",
                   "tooltip": "Importar silenciosamente VPN Config.reg desde el paquete ZIP en red"
-                },
-                {
-                  "label": "Descargar",
-                  "type": "url",
-                  "url_key": "forticlient_zip",
-                  "install_embedded_msi": true,
-                  "import_embedded_reg": true
                 }
               ]
             },
@@ -343,6 +352,38 @@
               ]
             }
           ]
+        },
+        {
+          "title": "CONECTIVIDAD Y ACCESOS",
+          "items": [
+            {
+              "id": "server_credentials",
+              "title": "Credenciales de Servidores",
+              "status_source": "credentials_enc",
+              "actions": [
+                {
+                  "label": "Configurar",
+                  "style": "PrimaryButton",
+                  "type": "task",
+                  "task": "open_credentials_dialog",
+                  "tooltip": "Descifrar credentials.enc con Contraseña Maestra o ingresar manualmente"
+                }
+              ]
+            },
+            {
+              "id": "network_shortcuts",
+              "title": "Accesos Directos de Red",
+              "actions": [
+                {
+                  "label": "Crear",
+                  "style": "PrimaryButton",
+                  "type": "task",
+                  "task": "create_network_shortcuts",
+                  "tooltip": "Crear accesos directos .lnk a 172.30.0.13 y 172.31.11.146 sin pedir contraseñas"
+                }
+              ]
+            }
+          ]
         }
       ]
     },
@@ -351,7 +392,7 @@
       "title": "Ofimática y Diseño",
       "subgroups": [
         {
-          "title": "Suite Microsoft y PDF",
+          "title": "OFIMÁTICA",
           "items": [
             {
               "id": "o365_proplus_2021",
@@ -394,30 +435,28 @@
             },
             {
               "id": "nitro_pdf_13",
-              "title": "Nitro PDF Pro 13",
-              "badge": "MSI Oficial",
-              "badge_style": "RowBadgeMuted",
+              "title": "Nitro PDF Pro",
               "actions": [
+                {
+                  "label": "Limpiar",
+                  "style": "",
+                  "type": "task",
+                  "task": "cleanup_nitropdf_temp",
+                  "tooltip": "Eliminar carpeta temporal NitroPDF del Escritorio"
+                },
                 {
                   "label": "Instalar",
                   "style": "PrimaryButton",
                   "type": "task",
                   "task": "install_nitropdf_lan",
                   "tooltip": "Extraer e instalar MSI oficial desde NitroPDF.zip"
-                },
-                {
-                  "label": "Limpiar Temp",
-                  "type": "task",
-                  "task": "cleanup_nitropdf_temp",
-                  "tooltip": "Eliminar carpeta temporal NitroPDF del Escritorio"
                 }
-              ],
-              "primary_count": 1
+              ]
             }
           ]
         },
         {
-          "title": "Diseño Creativo",
+          "title": "DISEÑO",
           "items": [
             {
               "id": "adobe_cc_2022",
@@ -521,7 +560,7 @@
           "items": [
             {
               "id": "dotnet_35",
-              "title": "Habilitar .NET Framework 3.5",
+              "title": ".NET Framework 3.5",
               "status_source": "dotnet35",
               "actions": [
                 {
@@ -542,27 +581,28 @@
             },
             {
               "id": "hdsentinel_pro",
-              "title": "Hard Disk Sentinel Pro 5.50",
+              "title": "Hard Disk Sentinel Pro",
               "actions": [
+                {
+                  "label": "Copiar EXE",
+                  "style": "",
+                  "type": "task",
+                  "task": "hdsentinel_replace_exe",
+                  "tooltip": "Extraer HDSentinel.exe desde Crack.zip, cerrar si está en ejecución y copiar en Program Files (x86)"
+                },
+                {
+                  "label": "Importar Key",
+                  "style": "",
+                  "type": "reg",
+                  "path": "\\\\172.30.0.13\\it\\SOFTWARE\\Hard Disk Sentinel Pro 5.50 Build 10482 + Crack\\Key (64bits)\\key.reg"
+                },
                 {
                   "label": "Instalar",
                   "style": "PrimaryButton",
                   "type": "exe",
                   "path": "\\\\172.30.0.13\\it\\SOFTWARE\\Hard Disk Sentinel Pro 5.50 Build 10482 + Crack\\hdsentinel_pro_setup.exe"
-                },
-                {
-                  "label": "Importar Key (.reg)",
-                  "type": "reg",
-                  "path": "\\\\172.30.0.13\\it\\SOFTWARE\\Hard Disk Sentinel Pro 5.50 Build 10482 + Crack\\Key (64bits)\\key.reg"
-                },
-                {
-                  "label": "Copiar HDSentinel.exe",
-                  "type": "task",
-                  "task": "hdsentinel_replace_exe",
-                  "tooltip": "Extraer HDSentinel.exe desde Crack.zip, cerrar si está en ejecución y copiar en Program Files (x86)"
                 }
-              ],
-              "primary_count": 1
+              ]
             },
             {
               "id": "battery_report",
@@ -582,11 +622,10 @@
               "title": "Adaptadores de Red (IP y DNS)",
               "actions": [
                 {
-                  "label": "Renovar IP y DNS",
+                  "label": "Renovar",
                   "style": "PrimaryButton",
                   "type": "task",
                   "task": "renew_ip_dns",
-                  "confirm": "Se reiniciarán las concesiones de red (flushdns, release, renew y registerdns), lo que cortará momentáneamente Internet y la VPN.\n\n¿Deseás continuar?",
                   "refresh_network": true,
                   "tooltip": "Ejecutar ipconfig /flushdns, /release, /renew y /registerdns y verificar conectividad"
                 }
@@ -595,51 +634,58 @@
           ]
         }
       ]
+    }
+  ],
+  "install_checks": {
+    "fox_suite": {
+      "paths": [
+        "C:\\Program Files (x86)\\Sol Sistemas\\EIDICO\\EidicoPrueba.EXE"
+      ]
     },
-    {
-      "id": "credenciales_red",
-      "title": "Credenciales y Red",
-      "subgroups": [
-        {
-          "title": "Accesos y Credenciales",
-          "items": [
-            {
-              "id": "server_credentials",
-              "title": "Credenciales de Servidores (cmdkey)",
-              "status_source": "credentials_enc",
-              "actions": [
-                {
-                  "label": "Administrador",
-                  "style": "",
-                  "type": "task",
-                  "task": "open_credential_manager",
-                  "tooltip": "Abrir Administrador de Credenciales de Windows"
-                },
-                {
-                  "label": "Credenciales",
-                  "style": "PrimaryButton",
-                  "type": "task",
-                  "task": "open_credentials_dialog",
-                  "tooltip": "Descifrar credentials.enc con Contraseña Maestra o ingresar manualmente"
-                }
-              ]
-            },
-            {
-              "id": "network_shortcuts",
-              "title": "Accesos Directos de Red",
-              "actions": [
-                {
-                  "label": "Crear en Escritorio",
-                  "style": "PrimaryButton",
-                  "type": "task",
-                  "task": "create_network_shortcuts",
-                  "tooltip": "Crear accesos directos .lnk a 172.30.0.13 y 172.31.11.146 sin pedir contraseñas"
-                }
-              ]
-            }
-          ]
-        }
+    "winscp_com": {
+      "paths": [
+        "%ProgramFiles(x86)%\\WinSCP\\WinSCP.exe",
+        "%ProgramFiles%\\WinSCP\\WinSCP.exe",
+        "C:\\Windows\\Microsoft.NET\\Framework\\v4.0.30319\\WinSCPnet.dll"
+      ]
+    },
+    "forticlient_vpn": {
+      "paths": [
+        "%ProgramFiles%\\Fortinet\\FortiClient\\FortiClient.exe",
+        "%ProgramFiles(x86)%\\Fortinet\\FortiClient\\FortiClient.exe"
+      ],
+      "reg_keys": [
+        "SOFTWARE\\Fortinet\\FortiClient"
+      ]
+    },
+    "aws_vpn": {
+      "paths": [
+        "%ProgramFiles%\\Amazon\\AWS VPN Client\\AWS VPN Client.exe",
+        "%ProgramFiles%\\Amazon\\AWS VPN Client\\AWSVPNClient.exe",
+        "%ProgramFiles(x86)%\\Amazon\\AWS VPN Client\\AWS VPN Client.exe",
+        "%ProgramFiles(x86)%\\Amazon\\AWS VPN Client\\AWSVPNClient.exe",
+        "%ProgramFiles%\\Amazon Web Services, Inc\\AWS VPN Client\\AWS VPN Client.exe",
+        "%ProgramFiles%\\Amazon Web Services, Inc\\AWS VPN Client\\AWSVPNClient.exe",
+        "%ProgramFiles(x86)%\\Amazon Web Services, Inc\\AWS VPN Client\\AWS VPN Client.exe",
+        "%ProgramFiles(x86)%\\Amazon Web Services, Inc\\AWS VPN Client\\AWSVPNClient.exe"
+      ],
+      "services": [
+        "AWSVPNClientService"
+      ],
+      "uninstall_names": [
+        "AWS VPN Client"
+      ]
+    },
+    "openvpn": {
+      "paths": [
+        "%ProgramFiles%\\OpenVPN\\bin\\openvpn-gui.exe",
+        "%ProgramFiles%\\OpenVPN\\bin\\openvpn.exe"
+      ]
+    },
+    "autocad_2021": {
+      "paths": [
+        "%ProgramFiles%\\Autodesk\\AutoCAD 2021\\acad.exe"
       ]
     }
-  ]
+  }
 }

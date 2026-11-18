@@ -7,12 +7,18 @@ from pathlib import Path
 import socket
 import subprocess
 from typing import Any, Callable
+import zipfile
 
 from PyQt6.QtCore import QThread, pyqtSignal
 import requests
 
 from src.config import AppConfig
-from src.system_tasks import process_forticlient_zip
+from src.system_tasks import (
+    check_software_installed,
+    format_task_exception,
+    process_forticlient_zip,
+    validate_unc_host,
+)
 
 _CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
 
@@ -158,17 +164,27 @@ class FileCopyWorker(QThread):
         source: str,
         destination: Path,
         chunk_size: int = 65536,
+        allowed_hosts: set[str] | None = None,
     ) -> None:
         super().__init__()
         self.source = source
         self.destination = destination
         self.chunk_size = chunk_size
+        self.allowed_hosts = allowed_hosts
         self._cancelled = False
 
     def cancel(self) -> None:
         self._cancelled = True
 
     def run(self) -> None:
+        if self.allowed_hosts is not None:
+            try:
+                validate_unc_host(self.source, self.allowed_hosts)
+            except PermissionError as exc:
+                self.log_message.emit(f"[ERROR] {exc}")
+                self.failed.emit(str(exc))
+                return
+
         src_path = Path(self.source)
         if not src_path.is_file():
             msg = f"No se encontró el archivo de origen: {self.source}"
@@ -215,7 +231,7 @@ class FileCopyWorker(QThread):
             self.finished_success.emit(str(self.destination))
         except Exception as exc:
             temp_dest.unlink(missing_ok=True)
-            msg = f"Error al copiar {src_path.name}: {exc}"
+            msg = format_task_exception(exc) if isinstance(exc, PermissionError) else f"Error al copiar {src_path.name}: {format_task_exception(exc)}"
             self.log_message.emit(f"[ERROR] {msg}")
             self.failed.emit(msg)
 
@@ -227,11 +243,18 @@ class IsoMountWorker(QThread):
     finished_success = pyqtSignal(str)
     failed = pyqtSignal(str)
 
-    def __init__(self, image_path: str, setup_relative_path: str, label: str) -> None:
+    def __init__(
+        self,
+        image_path: str,
+        setup_relative_path: str,
+        label: str,
+        allowed_hosts: set[str] | None = None,
+    ) -> None:
         super().__init__()
         self.image_path = image_path
         self.setup_relative_path = setup_relative_path
         self.label = label
+        self.allowed_hosts = allowed_hosts
 
     def run(self) -> None:
         if not self.image_path or not self.image_path.strip():
@@ -242,6 +265,14 @@ class IsoMountWorker(QThread):
             self.log_message.emit(f"[ADVERTENCIA] {msg}")
             self.failed.emit(msg)
             return
+
+        if self.allowed_hosts is not None:
+            try:
+                validate_unc_host(self.image_path, self.allowed_hosts)
+            except PermissionError as exc:
+                self.log_message.emit(f"[ERROR] {exc}")
+                self.failed.emit(str(exc))
+                return
 
         img = Path(self.image_path)
         if not img.is_file():
@@ -263,6 +294,7 @@ class IsoMountWorker(QThread):
                 ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps_cmd],
                 capture_output=True,
                 text=True,
+                shell=False,
                 creationflags=_CREATE_NO_WINDOW,
             )
             if res.returncode != 0:
@@ -281,7 +313,11 @@ class IsoMountWorker(QThread):
                 )
 
             self.log_message.emit(f"[INFO] Ejecutando instalador: {installer_path}")
-            subprocess.Popen([str(installer_path)], cwd=str(installer_path.parent))
+            subprocess.Popen(
+                [str(installer_path)],
+                cwd=str(installer_path.parent),
+                shell=False,
+            )
             self.finished_success.emit(f"Instalador de {self.label} iniciado desde {drive_letter}:")
         except Exception as exc:
             msg = f"Error al montar o iniciar {self.label}: {exc}"
@@ -307,6 +343,94 @@ class TaskWorker(QThread):
             result_msg = self._fn(*self._args, log=self.log_message.emit, **self._kwargs)
             self.finished_success.emit(result_msg or "Operación completada.")
         except Exception as exc:
-            msg = str(exc)
+            msg = format_task_exception(exc)
+            self.log_message.emit(f"[ERROR] {msg}")
+            self.failed.emit(msg)
+
+
+class InstalledSoftwareCheckWorker(QThread):
+    """Detecta en segundo plano qué herramientas configuradas ya están instaladas."""
+
+    status_ready = pyqtSignal(dict)
+
+    def __init__(self, config: AppConfig) -> None:
+        super().__init__()
+        self.config = config
+
+    def run(self) -> None:
+        try:
+            results = check_software_installed(self.config)
+            self.status_ready.emit(results)
+        except Exception:
+            self.status_ready.emit({})
+
+
+class ZipExtractWorker(QThread):
+    """Extrae archivos ZIP pesados en segundo plano reportando progreso y cancelación."""
+
+    progress_changed = pyqtSignal(int, float, float)
+    log_message = pyqtSignal(str)
+    finished_success = pyqtSignal(str)
+    failed = pyqtSignal(str)
+
+    def __init__(
+        self,
+        zip_path: str,
+        dest_dir: Path,
+        allowed_hosts: set[str] | None = None,
+    ) -> None:
+        super().__init__()
+        self.zip_path = zip_path
+        self.dest_dir = dest_dir
+        self.allowed_hosts = allowed_hosts
+        self._cancelled = False
+
+    def cancel(self) -> None:
+        self._cancelled = True
+
+    def run(self) -> None:
+        if self.allowed_hosts is not None:
+            try:
+                validate_unc_host(self.zip_path, self.allowed_hosts)
+            except PermissionError as exc:
+                self.log_message.emit(f"[ERROR] {exc}")
+                self.failed.emit(str(exc))
+                return
+
+        src = Path(self.zip_path)
+        if not src.is_file():
+            msg = f"No se encontró el archivo ZIP: {self.zip_path}"
+            self.log_message.emit(f"[ERROR] {msg}")
+            self.failed.emit(msg)
+            return
+
+        try:
+            self.dest_dir.mkdir(parents=True, exist_ok=True)
+            self.log_message.emit(f"[INFO] Extrayendo {src.name} en {self.dest_dir}...")
+            with zipfile.ZipFile(src, "r") as zf:
+                members = zf.infolist()
+                total_size = sum(m.file_size for m in members)
+                total_mb = total_size / (1024 * 1024) if total_size > 0 else 0.0
+                extracted_bytes = 0
+
+                for member in members:
+                    if self._cancelled:
+                        self.log_message.emit("[ADVERTENCIA] Extracción cancelada por el usuario.")
+                        self.failed.emit("Extracción cancelada por el usuario.")
+                        return
+                    zf.extract(member, self.dest_dir)
+                    extracted_bytes += member.file_size
+                    current_mb = extracted_bytes / (1024 * 1024)
+                    percent = (
+                        min(100, int((extracted_bytes / total_size) * 100))
+                        if total_size > 0
+                        else 100
+                    )
+                    self.progress_changed.emit(percent, current_mb, total_mb)
+
+            self.log_message.emit(f"[OK] {src.name} extraído correctamente en {self.dest_dir}.")
+            self.finished_success.emit(f"{src.name} extraído en {self.dest_dir}.")
+        except Exception as exc:
+            msg = format_task_exception(exc) if isinstance(exc, PermissionError) else f"Error al extraer {src.name}: {format_task_exception(exc)}"
             self.log_message.emit(f"[ERROR] {msg}")
             self.failed.emit(msg)

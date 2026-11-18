@@ -53,14 +53,14 @@ EzSetup_Python/
 ### Módulos Completados
 - [x] Entorno virtual `.venv` creado con Python 3.12 e instalación de `PyQt6`, `requests`, `pywin32`, `pyinstaller` y `cryptography`.
 - [x] `GEMINI.md`, `.gitignore` (excluyendo `*.enc`), `requirements.txt`, `build.ps1` y copia de `assets\EzSetup.ico`.
-- [x] `config.json` centralizado con catálogo extensible en **5 categorías** (`EIDICO`, `Ofimática y Diseño`, `Técnica`, `Reparaciones y Diagnóstico`, `Credenciales y Red`), acciones genéricas (`exe`, `msi`, `iso`, `ps1`, `copy`, `reg`, `url`, `task`), nuevas rutas (`Autodesk Revit LT 2020.1`, `uPanel Anura 4.4.2`, `Hard Disk Sentinel Pro 5.50`) y ocultamiento automático de ítems con ruta vacía (`dwg_trueview_2020`, `sketchup`).
-- [x] `src\config.py`: validación de esquema JSON (incluyendo `menus[*].subgroups`), soporte dual script/PyInstaller, `KnownFolders` y resolución automática de `credentials.enc` (local, bundle o UNC).
-- [x] `src\crypto_creds.py` y `manage_creds.py`: módulo AES-256-GCM + PBKDF2HMAC-SHA256 (600,000 iteraciones, salt 16 B, nonce 12 B) y CLI interactivo para generar/actualizar `credentials.enc`.
-- [x] `src\workers.py`: workers `QThread` reutilizables (`ServerCheckWorker`, `DownloadWorker`, `FileCopyWorker`, `IsoMountWorker`, `TaskWorker`).
-- [x] `src\system_tasks.py`: tareas administrativas (`cmdkey`, `create_network_shortcuts`, `Eidico.lnk`, ACL `FullControl` SID `S-1-5-32-545`, FortiClient ZIP, Firewall AutoCAD 2021, `RegAsm.exe`, OpenVPN, Fondos, EIDICO.vbs, `Produccion.zip`, `NitroPDF.zip`, `hdsentinel_replace_exe`, `powercfg /batteryreport`) y despacho genérico (`run_generic_exe`, `run_generic_msi`, `run_generic_reg`, `run_generic_ps1`, `copy_generic_item`, `TASK_REGISTRY`).
-- [x] `src\ui\`: catálogo dinámico desde `config.json` con subgrupos, filas `ActionRow` con máximo 3 botones visibles + menú desplegable `▾` (`QMenu`), ocultamiento automático de ítems vacíos, buscador en tiempo real (`Ctrl+F`), recarga en caliente (`Recargar Config`) y panel de registro colapsado por defecto.
-- [x] `main.py`: verificación y relanzamiento UAC (`ShellExecuteW "runas"`).
-- [x] Verificación técnica aprobada: `py_compile` sobre los 11 `.py`, escaneo de cero hardcoding, prueba de cifrado/descifrado AES-256-GCM y prueba headless (`QT_QPA_PLATFORM=offscreen`) de `MainWindow` y `CredentialDialog`.
+- [x] `config.json` centralizado (versión `2.4.0`) con catálogo extensible en **4 categorías**, subgrupo `CONECTIVIDAD Y ACCESOS`, subgrupos `OFIMÁTICA` y `DISEÑO`, nombres estandarizados (`Nitro PDF Pro` sin badge, `.NET Framework 3.5`, `Hard Disk Sentinel Pro`), ejecución directa de `Renovar` sin confirmación y detección universal para AWS VPN Client.
+- [x] `src\config.py`: validación de esquema JSON, `get_allowed_unc_hosts()`, `get_install_checks()`, `KnownFolders` y resolución de `credentials.enc` incluyendo carpeta padre (`dist\..`).
+- [x] `src\crypto_creds.py` y `manage_creds.py`: módulo AES-256-GCM + PBKDF2HMAC-SHA256 (600,000 iteraciones, salt 16 B, nonce 12 B) y CLI interactivo para `credentials.enc`.
+- [x] `src\workers.py`: workers `QThread` reutilizables (`ServerCheckWorker`, `InstalledSoftwareCheckWorker`, `DownloadWorker`, `FileCopyWorker`, `ZipExtractWorker`, `IsoMountWorker`, `TaskWorker`) con validación UNC, `shell=False` y traducción amigable de `PermissionError`.
+- [x] `src\system_tasks.py`: tareas administrativas con `shell=False` estricto, validación UNC (`UnauthorizedUNCHostError`), manejo amigable de `PermissionError` UAC (`format_task_exception`), registro/limpieza automática de temporales, detección universal de software + lectura de versión (`_get_file_version`, servicios, `Uninstall`), purga SMB/Kerberos previa a `cmdkey`, `renew_ip_and_dns`, `create_network_shortcuts`, `apply_autocad_firewall_block`, `hdsentinel_replace_exe`, etc.
+- [x] `src\ui\`: paleta monocromática limpia (`#0F1012` / `#17191D` / `#F4F4F5`), header limpio (`EzSetup`, `windowTitle` `"EzSetup v2.4.0"`, recarga `F5`), badge interactivo `"Sin UAC"`, botón cuadrado `32x30` con ícono vectorial de 3 puntos verticales (`⋮`), buscador con debounce de 150ms, badges `"Instalado"` con versión en tooltip, e íconos vectoriales de ojo en `CredentialDialog`.
+- [x] `main.py` y `build.ps1`: elevación UAC y compilación PyInstaller optimizada con exclusiones de módulos PyQt6 no utilizados (`QtWebEngine*`, `QtMultimedia`, `Qt3DCore`, `QtQml`, `QtQuick`).
+- [x] Verificación técnica aprobada: `py_compile` sobre los 11 `.py`, escaneo de cero hardcoding, paleta monocromática, ícono vectorial de 3 puntos verticales, microcopy, `Renovar` sin confirmación, resolución de `credentials.enc` desde `dist\` y prueba headless (`QT_QPA_PLATFORM=offscreen`) de `MainWindow`.
 
 ### En Progreso
 - Ninguno en curso al cierre de esta sesión.
@@ -74,6 +74,30 @@ EzSetup_Python/
 
 ## 3. Historial de Cambios
 
+- **2026-11-18 — v2.4.0 (Paleta Monocromática, Ícono `⋮` Vectorial, Microcopy y `credentials.enc` en `dist\`)**:
+  - Renovada completamente la hoja de estilos QSS (`src\ui\styles.py`) a una paleta monocromática neutra (`#0F1012`, `#17191D`, `#272A30`, `#24272E`, `#F4F4F5`, `#2E323B`, `#1F2228`), reservando verde/ámbar/rojo únicamente para badges de estado.
+  - Reemplazado el botón de texto `⋯` por un botón `32x30` con ícono vectorial de 3 puntos verticales (`_create_more_dots_icon` vía `QPainter`) en `src\ui\main_window.py`.
+  - Actualizado `config.json`: versión `2.4.0`, subgrupos `"OFIMÁTICA"` y `"DISEÑO"`, títulos `"Nitro PDF Pro"` (sin badge `"MSI Oficial"`), `".NET Framework 3.5"`, `"Hard Disk Sentinel Pro"` y ejecución directa de `"Renovar"` sin diálogo `"confirm"`.
+  - Actualizado `resolve_credentials_enc_path` (`src\config.py`) para buscar también en `resolve_app_root().parent` cuando `EzSetup.exe` corre desde `dist\`.
+  - Validado con smoke test completo en `.venv\Scripts\python.exe`.
+- **2026-11-18 — v2.3.2 (Detección Universal AWS VPN, Header Limpio, Microcopy + `⋯`, Ícono de Ojo y Botón `Sin UAC`)**:
+  - Implementada detección universal de `AWS VPN Client` (`src\system_tasks.py` y `config.json`) revisando rutas v3.x/v5.x/v6.x+, clave de servicio `AWSVPNClientService` y subclaves `Uninstall` (`HKLM`/`HKCU` + `WOW6432Node`), extrayendo la versión para mostrarla en el tooltip del badge `"Instalado"`.
+  - Limpiado el header (`src\ui\main_window.py` y `config.json`): `windowTitle` `"EzSetup v2.3.2"`, título interno `"EzSetup"` sin versión, eliminación del botón `"Recargar Config"` (mantenido mediante atajo `F5`) y conversión de `"Sin UAC"` en botón cliqueable que relanza con `ShellExecuteW "runas"`.
+  - Estandarizado el orden y microcopy de botones (`[Secundarios] -> [Configurar Todo] -> [Primario] -> [⋯]`): Fox (`[Descargar] [Configurar Todo] [Instalar] [⋯]` con `"Producción"`, `"EIDICO.vbs"`, `"EidicoPrueba.exe"`, `"Permisos Sol Sistemas"`, `"Acceso Directo"`), WinSCP (`[Configurar Todo] [Instalar] [⋯]`), FortiClient (`[Descargar] [Configurar Todo] [Instalar] [⋯]`), Accesos Directos (`"Crear"`), Nitro (`"Limpiar"`) y Red (`"Renovar"`).
+  - Reemplazados los botones de texto `"Mostrar"`/`"Ocultar"` en `CredentialDialog` (`src\ui\dialogs.py`) por botones cuadrados `32x30` con ícono vectorial de ojo (`QPainter`) abierto/tachado.
+  - Agregado `format_task_exception` (`src\system_tasks.py` y `src\workers.py`) para mostrar `"Permisos insuficientes. Ejecutá EzSetup como Administrador (clic en 'Sin UAC')."` ante `PermissionError` de Windows.
+- **2026-11-18 — v2.3.1 (4 Categorías, Nomenclatura de Servidores y Fix `'bool' object is not callable`)**:
+  - Consolidada la barra lateral en **4 categorías** (`EIDICO`, `Ofimática y Diseño`, `Técnica`, `Reparaciones y Diagnóstico`), moviendo `Credenciales de Servidores` (badge `"Almacén Cifrado"` + botón `"Configurar"`) y `Accesos Directos de Red` (`"Crear en Escritorio"`) al subgrupo `CONECTIVIDAD Y ACCESOS` dentro de `EIDICO`.
+  - Actualizada la nomenclatura de servidores en `config.json` (`Fileserver Benavidez` y `Fileserver AWS`), título del modal `"Configurar Credenciales de Red"` y formato `{label} ({host})` en `CredentialDialog` (`src\ui\dialogs.py`) sin duplicar la IP.
+  - Corregido el bug `'bool' object is not callable` blindando la conexión de señales `clicked`/`triggered` en `ActionRow` y validando `callable(...)` en `_run_task` / `_start_copy_eidico_prueba` (`src\ui\main_window.py`).
+  - Mejorado `src\ui\styles.py` con indicador circular visible en `QRadioButton::indicator` y `background-color: transparent` para `QDialog QLabel`.
+  - Validado con smoke test headless en `.venv\Scripts\python.exe`.
+- **2026-11-18 — v2.3.0 (Hardening, Fix Buscador, Botones en Línea, Detección y Build Optimizado)**:
+  - Corregido el parpadeo y ventana emergente fantasma del buscador (`Ctrl+F`) pre-creando las filas de búsqueda con `parent` explícito, usando `QTimer` debounce de `150ms` y filtrando por `setVisible(True/False)` dentro de `setUpdatesEnabled(False/True)`.
+  - Ajustada regla visual de botones: hasta **3 botones visibles en línea** (Nitro PDF `[Limpiar Temp] [Instalar]` y Hard Disk Sentinel `[Copiar EXE] [Importar Key] [Instalar]`) y botón desplegable `"Más ▾"` únicamente en filas con 4 o más acciones.
+  - Hardening en `src\system_tasks.py` y `src\workers.py`: `shell=False` explícito en todas las invocaciones `subprocess`, reemplazo de `cmd /c start` por `os.startfile`, validación de hosts UNC autorizados contra `servers` (`validate_unc_host`) y registro/limpieza automática de carpetas temporales en `closeEvent`.
+  - Agregada detección en segundo plano de software instalado (`InstalledSoftwareCheckWorker` + `install_checks` en `config.json` con badges `"Instalado"`), extracción asíncrona de `Produccion.zip` (`ZipExtractWorker`) y exclusiones de módulos PyQt6 no utilizados en `build.ps1`.
+  - Validado con smoke test headless en `.venv\Scripts\python.exe`.
 - **2026-11-17 — v2.2.1 (Red, Purga SMB y Prefijo de Dominio)**:
   - Agregada tarea asíncrona `renew_ip_and_dns` (`src\system_tasks.py`) y botón `"Renovar IP y DNS"` en `Reparaciones y Diagnóstico` (`config.json`), con confirmación previa `QMessageBox.question`, secuencia `ipconfig /flushdns`, `/release`, `/renew`, `/registerdns`, verificación contra `internet_probe_host` (`1.1.1.1`) y servidores configurados, y refresco automático de los badges de red del header.
   - Actualizado `register_server_credential` (`src\system_tasks.py`) para purgar sesiones previas (`net use \\<host> /delete /y`, `net use \\<host>\* /delete /y`, `klist purge`, `cmdkey /delete:<host>`) antes de `cmdkey /add`.

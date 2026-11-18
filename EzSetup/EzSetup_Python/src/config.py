@@ -202,6 +202,20 @@ class AppConfig:
             raise ConfigError(f"Servidor no configurado en config.json: '{key}'")
         return servers[key]
 
+    def get_allowed_unc_hosts(self) -> set[str]:
+        """Devuelve el conjunto de hosts autorizados (en minúsculas) configurados en servers."""
+        hosts: set[str] = set()
+        for info in self.get_servers().values():
+            host = str(info.get("host", "")).strip().lower()
+            if host:
+                hosts.add(host)
+        return hosts
+
+    def get_install_checks(self) -> dict[str, dict[str, Any]]:
+        """Devuelve el diccionario de verificaciones de software instalado."""
+        checks = self._data.get("install_checks", {})
+        return checks if isinstance(checks, dict) else {}
+
     def get_local_path_raw(self, key: str) -> str:
         local_paths = self._data.get("local_paths", {})
         if key not in local_paths:
@@ -260,10 +274,12 @@ class AppConfig:
         return resolve_app_root() / filename
 
     def resolve_credentials_enc_path(self) -> Path | None:
-        """Busca credentials.enc en el directorio local, empaquetado o ruta UNC configurada."""
+        """Busca credentials.enc en el directorio local, carpeta padre (dist\\..), empaquetado o UNC."""
         filename = self.get_local_path_raw("credentials_enc_file")
+        app_root = resolve_app_root()
         candidates: list[Path] = [
-            resolve_app_root() / filename,
+            app_root / filename,
+            app_root.parent / filename,
             resolve_bundle_root() / filename,
         ]
         try:

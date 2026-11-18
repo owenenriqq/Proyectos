@@ -3,9 +3,8 @@
     Sincroniza automáticamente el repositorio local de Proyectos con GitHub al finalizar la jornada.
 #>
 
-$ErrorActionPreference = "Stop"
+$ErrorActionPreference = "Continue"
 
-# Detectar automáticamente la ruta del repositorio según la PC
 $posiblesRutas = @(
     "D:\Proyectos",
     "D:\Carpetas de usuario\Proyectos"
@@ -22,68 +21,79 @@ if (-not $repoPath) {
 Set-Location $repoPath
 Write-Host "=== Sincronizando repositorio en: $repoPath ===" -ForegroundColor Cyan
 
-# 1. Verificar identidad local para evitar avisos de Committer en PC corporativa
-$currentEmail = git config user.email
-if ($currentEmail -ne "owenntrip@gmail.com") {
+# 1. Asegurar identidad local
+if ((git config user.email) -ne "owenntrip@gmail.com") {
     git config user.name "Owen Enrique"
     git config user.email "owenntrip@gmail.com"
 }
 
-# 2. Revisar estado actual
+# 2. Revisar cambios sin commitear
 $status = git status --porcelain
 
-if ([string]::IsNullOrWhiteSpace($status)) {
-    Write-Host "`nNo hay cambios locales pendientes de subir." -ForegroundColor Yellow
-    Write-Host "Verificando si hay actualizaciones en GitHub..." -ForegroundColor Cyan
-    git pull --rebase origin main
-    Write-Host "`n[OK] Repositorio al día." -ForegroundColor Green
-    Start-Sleep -Seconds 3
-    exit 0
-}
+if (-not [string]::IsNullOrWhiteSpace($status)) {
+    Write-Host "`nArchivos modificados o nuevos detectados:" -ForegroundColor Yellow
+    git status -s
 
-# 3. Mostrar archivos modificados
-Write-Host "`nArchivos modificados o nuevos detectados:" -ForegroundColor Yellow
-git status -s
+    if (-not ($status | Select-String "ESTADO.md")) {
+        Write-Host "`n[AVISO] Ningún archivo ESTADO.md fue modificado hoy." -ForegroundColor Magenta
+    }
 
-# Recordatorio de ESTADO.md
-$estadoModificado = $status | Select-String "ESTADO.md"
-if (-not $estadoModificado) {
-    Write-Host "`n[AVISO] Ningún archivo ESTADO.md fue modificado hoy." -ForegroundColor Magenta
-}
+    $equipo = if ($repoPath -like "*Carpetas de usuario*") { "Trabajo" } else { "Casa" }
+    $fecha = Get-Date -Format "yyyy-MM-dd HH:mm"
+    $mensajeDefault = "Actualiza avances ($equipo - $fecha)"
 
-# 4. Solicitar mensaje de commit (o usar uno por defecto con fecha/equipo)
-$equipo = if ($repoPath -like "*Carpetas de usuario*") { "Trabajo" } else { "Casa" }
-$fecha = Get-Date -Format "yyyy-MM-dd HH:mm"
-$mensajeDefault = "Actualiza avances ($equipo - $fecha)"
+    Write-Host ""
+    $mensaje = Read-Host "Mensaje del commit [Enter para usar: '$mensajeDefault']"
+    if ([string]::IsNullOrWhiteSpace($mensaje)) {
+        $mensaje = $mensajeDefault
+    }
 
-Write-Host ""
-$mensaje = Read-Host "Mensaje del commit [Enter para usar: '$mensajeDefault']"
-if ([string]::IsNullOrWhiteSpace($mensaje)) {
-    $mensaje = $mensajeDefault
-}
-
-# 5. Ejecutar flujo completo de sincronización
-try {
     Write-Host "`n1. Preparando archivos (git add -A)..." -ForegroundColor Cyan
     git add -A
 
     Write-Host "2. Guardando commit local..." -ForegroundColor Cyan
     git commit -m $mensaje
-
-    Write-Host "3. Integrando cambios remotos (git pull --rebase)..." -ForegroundColor Cyan
-    git pull --rebase origin main
-
-    Write-Host "4. Subiendo a GitHub (git push)..." -ForegroundColor Cyan
-    git push origin main
-
-    Write-Host "`n[ÉXITO] Todo sincronizado correctamente con GitHub." -ForegroundColor Green
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "`n[ERROR] Falló git commit. Revisa el mensaje arriba." -ForegroundColor Red
+        Read-Host "Presiona Enter para cerrar"
+        exit 1
+    }
 }
-catch {
-    Write-Host "`n[ERROR] Ocurrió un problema durante la sincronización:" -ForegroundColor Red
-    Write-Host $_.Exception.Message -ForegroundColor Red
-    Write-Host "Revisa el estado ejecutando 'git status' en la consola." -ForegroundColor Yellow
+else {
+    Write-Host "`nNo hay archivos nuevos sin guardar." -ForegroundColor Yellow
+}
+
+# 3. Integrar cambios remotos (siempre se ejecuta)
+Write-Host "`n3. Integrando cambios remotos (git pull --rebase)..." -ForegroundColor Cyan
+git pull --rebase origin main
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "`n[ERROR] Hubo un conflicto o error en git pull --rebase. Resuélvelo antes de subir." -ForegroundColor Red
     Read-Host "Presiona Enter para cerrar"
     exit 1
 }
 
-Start-Sleep -Seconds 3
+# 4. Verificar si hay commits locales pendientes de subir (incluso de ejecuciones anteriores)
+$commitsPendientes = [int](git rev-list --count origin/main..HEAD)
+
+if ($commitsPendientes -gt 0) {
+    Write-Host "`n4. Subiendo $commitsPendientes commit(s) pendiente(s) a GitHub (git push)..." -ForegroundColor Cyan
+    git push origin main
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "`n[ERROR] Falló git push. Revisa tu conexión o credenciales arriba." -ForegroundColor Red
+        Read-Host "Presiona Enter para cerrar"
+        exit 1
+    }
+    Write-Host "`n[ÉXITO] Todo sincronizado correctamente con GitHub." -ForegroundColor Green
+}
+else {
+    Write-Host "`n[OK] El repositorio ya estaba completamente sincronizado con GitHub." -ForegroundColor Green
+}
+
+# Esperar 30 segundos o permitir cierre inmediato con cualquier tecla
+Write-Host "`nEsta ventana se cerrará automáticamente en 30 segundos (o presiona una tecla para cerrar ya)..." -ForegroundColor DarkGray
+$timeout = 30
+while ($timeout -gt 0 -and -not [Console]::KeyAvailable) {
+    Start-Sleep -Seconds 1
+    $timeout--
+}
+if ([Console]::KeyAvailable) { [Console]::ReadKey($true) | Out-Null }

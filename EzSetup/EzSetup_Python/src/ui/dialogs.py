@@ -5,7 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import QPointF, QSize, Qt, pyqtSignal
+from PyQt6.QtGui import QColor, QIcon, QPainter, QPainterPath, QPen, QPixmap
 from PyQt6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -29,6 +30,30 @@ from src.config import AppConfig
 from src.crypto_creds import CredentialCryptoError, load_encrypted_credentials
 
 
+def _create_eye_icon(crossed: bool = False) -> QIcon:
+    """Dibuja vectorialmente un ícono de ojo abierto o tachado para campos de contraseña."""
+    pixmap = QPixmap(20, 20)
+    pixmap.fill(Qt.GlobalColor.transparent)
+
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+    pen = QPen(QColor("#e2e8f0"), 1.6, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin)
+    painter.setPen(pen)
+
+    eye_path = QPainterPath()
+    eye_path.moveTo(2.5, 10.0)
+    eye_path.quadTo(10.0, 3.5, 17.5, 10.0)
+    eye_path.quadTo(10.0, 16.5, 2.5, 10.0)
+    painter.drawPath(eye_path)
+    painter.drawEllipse(QPointF(10.0, 10.0), 2.4, 2.4)
+
+    if crossed:
+        painter.drawLine(QPointF(3.5, 16.5), QPointF(16.5, 3.5))
+
+    painter.end()
+    return QIcon(pixmap)
+
+
 class _CredentialEntryBlock(QFrame):
     """Bloque de entrada manual de usuario y contraseña para un servidor."""
 
@@ -42,7 +67,7 @@ class _CredentialEntryBlock(QFrame):
         layout.setContentsMargins(12, 10, 12, 10)
         layout.setSpacing(6)
 
-        title = QLabel(f"{server_info.get('label', server_key)}  ({server_info.get('unc_root', '')})")
+        title = QLabel(f"{server_info.get('label', server_key)} ({server_info.get('host', '')})", self)
         title.setObjectName("RowTitle")
         layout.addWidget(title)
 
@@ -61,9 +86,13 @@ class _CredentialEntryBlock(QFrame):
         self.password_edit.setEchoMode(QLineEdit.EchoMode.Password)
         self.password_edit.setPlaceholderText("Ingresá la contraseña")
 
-        self.toggle_btn = QPushButton("Mostrar")
+        self.toggle_btn = QPushButton("", self)
+        self.toggle_btn.setObjectName("EyeButton")
         self.toggle_btn.setCheckable(True)
-        self.toggle_btn.setFixedWidth(74)
+        self.toggle_btn.setFixedSize(32, 30)
+        self.toggle_btn.setIcon(_create_eye_icon(False))
+        self.toggle_btn.setIconSize(QSize(18, 18))
+        self.toggle_btn.setToolTip("Mostrar contraseña")
         self.toggle_btn.toggled.connect(self._on_toggle_password)
 
         pwd_row.addWidget(self.password_edit)
@@ -76,10 +105,12 @@ class _CredentialEntryBlock(QFrame):
     def _on_toggle_password(self, checked: bool) -> None:
         if checked:
             self.password_edit.setEchoMode(QLineEdit.EchoMode.Normal)
-            self.toggle_btn.setText("Ocultar")
+            self.toggle_btn.setIcon(_create_eye_icon(True))
+            self.toggle_btn.setToolTip("Ocultar contraseña")
         else:
             self.password_edit.setEchoMode(QLineEdit.EchoMode.Password)
-            self.toggle_btn.setText("Mostrar")
+            self.toggle_btn.setIcon(_create_eye_icon(False))
+            self.toggle_btn.setToolTip("Mostrar contraseña")
 
     def get_values(self) -> tuple[str, str]:
         return self.username_edit.text().strip(), self.password_edit.text()
@@ -96,7 +127,7 @@ class CredentialDialog(QDialog):
         self._enc_path: Path | None = config.resolve_credentials_enc_path()
         self._resolved_entries: list[dict[str, Any]] = []
 
-        self.setWindowTitle("Credenciales de Windows (cmdkey)")
+        self.setWindowTitle("Configurar Credenciales de Red")
         self.setMinimumWidth(490)
         self.setModal(True)
 
@@ -171,9 +202,13 @@ class CredentialDialog(QDialog):
         self.master_pwd_edit = QLineEdit()
         self.master_pwd_edit.setEchoMode(QLineEdit.EchoMode.Password)
         self.master_pwd_edit.setPlaceholderText("Ingresá la Contraseña Maestra de IT")
-        self.master_toggle_btn = QPushButton("Mostrar")
+        self.master_toggle_btn = QPushButton("", card)
+        self.master_toggle_btn.setObjectName("EyeButton")
         self.master_toggle_btn.setCheckable(True)
-        self.master_toggle_btn.setFixedWidth(74)
+        self.master_toggle_btn.setFixedSize(32, 30)
+        self.master_toggle_btn.setIcon(_create_eye_icon(False))
+        self.master_toggle_btn.setIconSize(QSize(18, 18))
+        self.master_toggle_btn.setToolTip("Mostrar contraseña")
         self.master_toggle_btn.toggled.connect(self._on_toggle_master_pwd)
         pwd_row.addWidget(self.master_pwd_edit)
         pwd_row.addWidget(self.master_toggle_btn)
@@ -193,7 +228,8 @@ class CredentialDialog(QDialog):
         selector_row.addWidget(QLabel("Servidor:"))
         self.target_combo = QComboBox()
         for key, info in self._servers.items():
-            self.target_combo.addItem(str(info.get("label", key)), userData=key)
+            display = f"{info.get('label', key)} ({info.get('host', '')})"
+            self.target_combo.addItem(display, userData=key)
         if len(self._servers) > 1:
             self.target_combo.addItem("Todos los servidores", userData="__all__")
         self.target_combo.currentIndexChanged.connect(self._refresh_visible_blocks)
@@ -211,10 +247,12 @@ class CredentialDialog(QDialog):
     def _on_toggle_master_pwd(self, checked: bool) -> None:
         if checked:
             self.master_pwd_edit.setEchoMode(QLineEdit.EchoMode.Normal)
-            self.master_toggle_btn.setText("Ocultar")
+            self.master_toggle_btn.setIcon(_create_eye_icon(True))
+            self.master_toggle_btn.setToolTip("Ocultar contraseña")
         else:
             self.master_pwd_edit.setEchoMode(QLineEdit.EchoMode.Password)
-            self.master_toggle_btn.setText("Mostrar")
+            self.master_toggle_btn.setIcon(_create_eye_icon(False))
+            self.master_toggle_btn.setToolTip("Mostrar contraseña")
 
     def _browse_enc_file(self) -> None:
         selected, _ = QFileDialog.getOpenFileName(
@@ -227,7 +265,7 @@ class CredentialDialog(QDialog):
             self._enc_path = Path(selected)
             self.enc_path_edit.setText(selected)
 
-    def _on_mode_changed(self) -> None:
+    def _on_mode_changed(self, _checked: bool = False) -> None:
         if self.master_radio.isChecked():
             self.mode_stack.setCurrentIndex(0)
             self.master_pwd_edit.setFocus()
@@ -241,7 +279,7 @@ class CredentialDialog(QDialog):
             return list(self._servers.keys())
         return [str(selected)]
 
-    def _refresh_visible_blocks(self) -> None:
+    def _refresh_visible_blocks(self, _index: int = 0) -> None:
         active = set(self._active_server_keys())
         for key, block in self._blocks.items():
             block.setVisible(key in active)
