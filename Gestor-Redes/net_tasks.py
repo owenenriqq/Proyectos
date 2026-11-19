@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ctypes
 from dataclasses import dataclass, field
 from datetime import datetime
 import ipaddress
@@ -17,10 +18,7 @@ LogCallback = Callable[[str], None]
 
 _CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
 
-UAC_PERMISSION_MSG = (
-    "Permisos insuficientes. Ejecutá Gestor de Redes como Administrador "
-    "(clic en 'Sin UAC')."
-)
+UAC_PERMISSION_MSG = "Permisos insuficientes. Ejecutá Gestor de Redes como Administrador."
 
 DNS_PRESETS: dict[str, list[str]] = {
     "Automático (DHCP)": [],
@@ -101,24 +99,34 @@ class NetworkAdapter:
         gw_part = self.gateway or "-"
         dns_part = ", ".join(self.dns_servers[:2]) if self.dns_servers else "Automático"
         mac_part = self.mac_address or "-"
-        return f"IP: {ip_part}  |  GW: {gw_part}  |  DNS: {dns_part}  |  MAC: {mac_part}"
+        return f"IP: {ip_part} | GW: {gw_part} | DNS: {dns_part} | MAC: {mac_part}"
 
 
 def _noop_log(_: str) -> None:
     """Callback por defecto cuando no se provee logger."""
 
 
+def is_user_admin() -> bool:
+    """Verifica si el proceso actual cuenta con privilegios reales de Administrador."""
+    try:
+        return bool(ctypes.windll.shell32.IsUserAnAdmin() != 0)
+    except Exception:
+        return False
+
+
 def format_task_exception(exc: Exception) -> str:
     """Traduce errores de permisos de Windows a un mensaje amigable UAC."""
     if isinstance(exc, PermissionError):
         return UAC_PERMISSION_MSG
-    if isinstance(exc, OSError) and (getattr(exc, "winerror", None) == 5 or exc.errno == 13):
-        return UAC_PERMISSION_MSG
-    text = str(exc)
-    low = text.lower()
-    if any(marker in low for marker in _ACCESS_DENIED_MARKERS):
-        return UAC_PERMISSION_MSG
-    return text
+    if not is_user_admin():
+        if isinstance(exc, OSError) and (getattr(exc, "winerror", None) == 5 or exc.errno == 13):
+            return UAC_PERMISSION_MSG
+        text = str(exc)
+        low = text.lower()
+        if any(marker in low for marker in _ACCESS_DENIED_MARKERS):
+            return UAC_PERMISSION_MSG
+        return text
+    return str(exc)
 
 
 def _ps_quote(value: str) -> str:
@@ -127,13 +135,17 @@ def _ps_quote(value: str) -> str:
 
 
 def _decode_console_output(raw: bytes | None) -> str:
-    """Decodifica salida de utilidades nativas de Windows sin caracteres corruptos."""
+    """Decodifica salida de utilidades nativas de Windows (UTF-8 estricto con fallback OEM)."""
     if not raw:
         return ""
-    for encoding in ("oem", "cp850", "utf-8", "cp1252"):
+    try:
+        return raw.decode("utf-8")
+    except UnicodeDecodeError:
+        pass
+    for encoding in ("oem", "cp850", "cp1252"):
         try:
-            return raw.decode(encoding)
-        except (LookupError, UnicodeDecodeError):
+            return raw.decode(encoding, errors="replace")
+        except LookupError:
             continue
     return raw.decode("utf-8", errors="replace")
 
@@ -153,8 +165,12 @@ def _run_cmd(
         creationflags=_CREATE_NO_WINDOW,
     )
     if utf8:
-        stdout = (proc.stdout or b"").decode("utf-8", errors="replace")
-        stderr = (proc.stderr or b"").decode("utf-8", errors="replace")
+        try:
+            stdout = (proc.stdout or b"").decode("utf-8")
+            stderr = (proc.stderr or b"").decode("utf-8")
+        except UnicodeDecodeError:
+            stdout = _decode_console_output(proc.stdout)
+            stderr = _decode_console_output(proc.stderr)
     else:
         stdout = _decode_console_output(proc.stdout)
         stderr = _decode_console_output(proc.stderr)
@@ -185,11 +201,58 @@ def _run_powershell(script: str, timeout: float | None = 30.0) -> tuple[int, str
 
 def _check_access_denied(returncode: int, stdout: str, stderr: str) -> None:
     """Detecta respuestas de permiso denegado en salida de comandos Windows."""
-    if returncode == 0:
+    if returncode == 0 or is_user_admin():
         return
     combined = f"{stderr}\n{stdout}".lower()
     if any(marker in combined for marker in _ACCESS_DENIED_MARKERS):
         raise PermissionError(UAC_PERMISSION_MSG)
+
+
+def _is_partial_ip_reset_success(
+    cmd: list[str],
+    returncode: int,
+    stdout: str,
+    stderr: str,
+) -> bool:
+    """Detecta si netsh int ip reset completó cambios pese a una subclave NSI protegida."""
+    if returncode == 0 or cmd[:4] != ["netsh", "int", "ip", "reset"]:
+        return False
+    if not is_user_admin():
+        return False
+    combined = f"{stdout}\n{stderr}".lower()
+    markers = (
+        "se restableci",
+        "restableciendo",
+        "reinicie el equipo",
+        "resetting",
+        "restart the computer",
+        "ok.",
+        "ok\r",
+        "ok\n",
+        "ok!",
+    )
+    return any(marker in combined for marker in markers)
+
+
+def _log_partial_ip_reset_warning(
+    code: int,
+    stdout: str,
+    stderr: str,
+    log: LogCallback,
+) -> None:
+    """Registra en el log el detalle completo de un retorno parcial de netsh int ip reset."""
+    for line in stderr.splitlines():
+        if line.strip():
+            log(f"  {line.strip()}")
+    detail = " | ".join(
+        part.strip()
+        for part in f"{stdout}\n{stderr}".splitlines()
+        if part.strip()
+    )
+    log(
+        f"[ADVERTENCIA] netsh int ip reset finalizó con código {code} por subclave protegida del sistema (NSI), "
+        f"pero completó el restablecimiento TCP/IP. Detalle: {detail or 'sin detalle'}"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -773,6 +836,57 @@ def flush_dns_cache(log: LogCallback = _noop_log) -> str:
     return "Caché DNS limpiada correctamente."
 
 
+def purge_network_sessions(log: LogCallback = _noop_log) -> str:
+    """Purga conexiones SMB (net use * /delete /y) y tickets Kerberos (klist purge)."""
+    log("[INFO] Purgando sesiones de red SMB (net use * /delete /y)...")
+    try:
+        net_code, net_out, net_err = _run_cmd(["net", "use", "*", "/delete", "/y"], timeout=20.0)
+    except FileNotFoundError:
+        net_code, net_out, net_err = -1, "", "Comando 'net' no encontrado."
+
+    net_detail = (net_out or net_err).strip()
+    for line in net_detail.splitlines():
+        if line.strip():
+            log(f"  {line.strip()}")
+
+    if net_code == 0:
+        log("[OK] Sesiones SMB / unidades de red purgadas.")
+        smb_status = "OK"
+    else:
+        low_net = net_detail.lower()
+        if "no hay entradas" in low_net or "no entries" in low_net or "no se encontr" in low_net:
+            log("[INFO] Sin sesiones SMB activas para eliminar.")
+            smb_status = "Sin sesiones activas"
+        else:
+            log(f"[ADVERTENCIA] net use finalizó con código {net_code}: {net_detail or 'sin detalle'}")
+            smb_status = f"Aviso ({net_code})"
+
+    log("[INFO] Purgando caché de tickets Kerberos (klist purge)...")
+    try:
+        k_code, k_out, k_err = _run_cmd(["klist", "purge"], timeout=20.0)
+    except FileNotFoundError:
+        k_code, k_out, k_err = -1, "", "Comando 'klist' no encontrado en este sistema."
+
+    k_detail = (k_out or k_err).strip()
+    for line in k_detail.splitlines():
+        if line.strip():
+            log(f"  {line.strip()}")
+
+    if k_code == 0:
+        log("[OK] Tickets Kerberos purgados correctamente.")
+        krb_status = "OK"
+    else:
+        low_k = k_detail.lower()
+        if "0x8009030e" in low_k or "no tickets" in low_k or "ningún" in low_k or "ningun" in low_k or "no hay" in low_k:
+            log("[INFO] No había tickets Kerberos activos en caché.")
+            krb_status = "Sin tickets activos"
+        else:
+            log(f"[ADVERTENCIA] klist purge finalizó con código {k_code}: {k_detail or 'sin detalle'}")
+            krb_status = f"Aviso ({k_code})"
+
+    return f"Sesiones de red purgadas (SMB: {smb_status} | Kerberos: {krb_status})."
+
+
 def renew_ip_and_dns(
     adapter_name: str = "",
     probe_host: str = "1.1.1.1",
@@ -838,8 +952,11 @@ def reset_winsock_and_tcpip(log: LogCallback = _noop_log) -> str:
             if line.strip():
                 log(f"  {line.strip()}")
         if code != 0:
-            detail = (stderr or stdout).strip()
-            raise RuntimeError(f"Error al ejecutar {' '.join(cmd)}: {detail}")
+            if _is_partial_ip_reset_success(cmd, code, stdout, stderr):
+                _log_partial_ip_reset_warning(code, stdout, stderr, log)
+            else:
+                detail = (stderr or stdout).strip()
+                raise RuntimeError(f"Error al ejecutar {' '.join(cmd)}: {detail}")
 
     log("[OK] Winsock y TCP/IP restablecidos. Se recomienda reiniciar Windows.")
     return "Winsock y pila TCP/IP restablecidos. Reiniciá el equipo para aplicar los cambios."
@@ -926,9 +1043,13 @@ def run_deep_network_cleanup(log: LogCallback = _noop_log) -> str:
             if line.strip():
                 log(f"  {line.strip()}")
         if r_code != 0:
-            detail = (r_err or r_out).strip()
-            raise RuntimeError(f"Error al ejecutar {' '.join(cmd)}: {detail}")
-        log(f"[OK] {' '.join(cmd)} completado.")
+            if _is_partial_ip_reset_success(cmd, r_code, r_out, r_err):
+                _log_partial_ip_reset_warning(r_code, r_out, r_err, log)
+            else:
+                detail = (r_err or r_out).strip()
+                raise RuntimeError(f"Error al ejecutar {' '.join(cmd)}: {detail}")
+        else:
+            log(f"[OK] {' '.join(cmd)} completado.")
 
     log("[OK] Limpieza profunda finalizada. Se requiere reiniciar Windows.")
     return "Limpieza profunda completada. Reiniciá el equipo para aplicar los cambios."

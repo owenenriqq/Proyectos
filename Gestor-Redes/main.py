@@ -128,62 +128,98 @@ class ActionRow(QFrame):
         secondary_badge_style: str = "RowBadgeMuted",
         meta_text: str = "",
         tooltip: str = "",
+        badges_in_meta: bool = False,
+        compact_buttons: bool = False,
+        compact_vertical: bool = False,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
         self.setObjectName("ActionRow")
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
-        self.setMinimumHeight(44 if not meta_text else 58)
+        if compact_vertical:
+            self.setMinimumHeight(40 if not meta_text else 48)
+        else:
+            self.setMinimumHeight(44 if not meta_text else 58)
         if tooltip:
             self.setToolTip(tooltip)
 
         outer = QHBoxLayout(self)
-        outer.setContentsMargins(14, 7, 14, 7)
-        outer.setSpacing(10)
+        outer.setContentsMargins(14, 5 if compact_vertical else 7, 14, 5 if compact_vertical else 7)
+        outer.setSpacing(8 if compact_buttons else 10)
 
         left_col = QVBoxLayout()
         left_col.setContentsMargins(0, 0, 0, 0)
-        left_col.setSpacing(3)
+        left_col.setSpacing(2 if compact_vertical else 3)
 
         title_line = QHBoxLayout()
         title_line.setContentsMargins(0, 0, 0, 0)
         title_line.setSpacing(7)
 
-        title_lbl = QLabel(title, self)
-        title_lbl.setObjectName("RowTitle")
-        title_lbl.setWordWrap(True)
-        title_line.addWidget(title_lbl)
+        has_badges = bool(badge_text or secondary_badge_text)
+        has_top_badges = has_badges and not badges_in_meta
+
+        self.title_label = QLabel(title, self)
+        self.title_label.setObjectName("RowTitle")
+        self.title_label.setWordWrap(True)
 
         self.badge_label = QLabel(badge_text, self)
         self.badge_label.setObjectName(badge_style)
         self.badge_label.setVisible(bool(badge_text))
-        title_line.addWidget(self.badge_label)
 
         self.secondary_badge_label = QLabel(secondary_badge_text, self)
         self.secondary_badge_label.setObjectName(secondary_badge_style)
         self.secondary_badge_label.setVisible(bool(secondary_badge_text))
-        title_line.addWidget(self.secondary_badge_label)
 
-        title_line.addStretch(1)
+        if has_top_badges:
+            title_line.addWidget(self.title_label)
+            title_line.addWidget(self.badge_label)
+            title_line.addWidget(self.secondary_badge_label)
+            title_line.addStretch(1)
+        else:
+            self.title_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+            title_line.addWidget(self.title_label, stretch=1)
+
         left_col.addLayout(title_line)
 
-        if meta_text:
-            meta_lbl = QLabel(meta_text, self)
-            meta_lbl.setObjectName("RowMeta")
-            meta_lbl.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
-            meta_lbl.setMinimumWidth(0)
-            meta_lbl.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-            left_col.addWidget(meta_lbl)
+        self.meta_label: QLabel | None = None
+        if badges_in_meta:
+            meta_line = QHBoxLayout()
+            meta_line.setContentsMargins(0, 0, 0, 0)
+            meta_line.setSpacing(6)
+            self.badge_label.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+            self.secondary_badge_label.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+            meta_line.addWidget(self.badge_label)
+            meta_line.addWidget(self.secondary_badge_label)
+            if meta_text:
+                self.meta_label = QLabel(meta_text, self)
+                self.meta_label.setObjectName("RowMeta")
+                self.meta_label.setWordWrap(True)
+                self.meta_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+                self.meta_label.setMinimumWidth(0)
+                self.meta_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+                meta_line.addWidget(self.meta_label, stretch=1)
+            else:
+                meta_line.addStretch(1)
+            left_col.addLayout(meta_line)
+        elif meta_text:
+            self.meta_label = QLabel(meta_text, self)
+            self.meta_label.setObjectName("RowMeta")
+            self.meta_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+            self.meta_label.setMinimumWidth(0)
+            self.meta_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+            left_col.addWidget(self.meta_label)
 
         outer.addLayout(left_col, stretch=1)
 
         btn_layout = QHBoxLayout()
         btn_layout.setContentsMargins(0, 0, 0, 0)
-        btn_layout.setSpacing(7)
+        btn_layout.setSpacing(5 if compact_buttons else 7)
 
         for text, obj_name, btn_tip, handler in visible_actions:
             btn = QPushButton(text, self)
             btn.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+            if compact_buttons:
+                btn.setProperty("compact", True)
             if obj_name:
                 btn.setObjectName(obj_name)
             if btn_tip:
@@ -252,7 +288,7 @@ class MainWindow(QMainWindow):
 
         self.append_log(
             f"[INFO] {APP_NAME} v{APP_VERSION} iniciado "
-            f"({'Administrador' if self.is_admin else 'Sin UAC'})."
+            f"({'Administrador' if self.is_admin else 'Modo Estándar'})."
         )
         self._connectivity_timer.start()
         self.refresh_all_now()
@@ -330,7 +366,7 @@ class MainWindow(QMainWindow):
             admin_badge.setObjectName("AdminBadgeOk")
             layout.addWidget(admin_badge)
         else:
-            admin_btn = QPushButton("Sin UAC", bar)
+            admin_btn = QPushButton("Elevar Admin", bar)
             admin_btn.setObjectName("AdminBadgeWarnBtn")
             admin_btn.setCursor(Qt.CursorShape.PointingHandCursor)
             admin_btn.setToolTip("Clic para reiniciar como Administrador")
@@ -532,6 +568,8 @@ class MainWindow(QMainWindow):
                 secondary_badge_style="RowBadgeMuted",
                 meta_text=adp.summary_line(),
                 tooltip=tooltip,
+                badges_in_meta=True,
+                compact_buttons=True,
                 parent=self.adapters_list_container,
             )
             self.adapters_list_layout.addWidget(row)
@@ -639,6 +677,27 @@ class MainWindow(QMainWindow):
         )
         rows_spec.append(("limpiar cache dns flushdns", "flush", r_flush))
 
+        r_purge = ActionRow(
+            title="Purgar Sesiones de Red (SMB / Kerberos)",
+            meta_text="Ejecuta net use * /delete /y y klist purge para tomar nuevos permisos sin cerrar sesión",
+            visible_actions=[
+                (
+                    "Purgar",
+                    "",
+                    "Eliminar conexiones de red SMB y tickets Kerberos en caché sin cerrar sesión",
+                    lambda: self._run_task(
+                        "Purgar Sesiones de Red",
+                        net_tasks.purge_network_sessions,
+                        refresh_after=False,
+                    ),
+                )
+            ],
+            parent=container,
+        )
+        rows_spec.append(
+            ("purgar sesiones red smb kerberos net use delete klist purge permisos", "purge", r_purge)
+        )
+
         for blob, _key, row in rows_spec:
             layout.addWidget(row)
             self._tool_rows_index.append((blob, row))
@@ -674,6 +733,9 @@ class MainWindow(QMainWindow):
 
     def _build_diagnostics_page(self) -> QScrollArea:
         scroll, container, layout = self._create_scroll_container()
+        self.diag_scroll = scroll
+        layout.setContentsMargins(18, 8, 14, 10)
+        layout.setSpacing(5)
 
         sub1 = QLabel("PRUEBAS ACTIVAS HACIA DESTINO", container)
         sub1.setObjectName("SubgroupTitle")
@@ -682,7 +744,7 @@ class MainWindow(QMainWindow):
         probe_card = QFrame(container)
         probe_card.setObjectName("ActionRow")
         probe_layout = QHBoxLayout(probe_card)
-        probe_layout.setContentsMargins(14, 10, 14, 10)
+        probe_layout.setContentsMargins(12, 7, 12, 7)
         probe_layout.setSpacing(8)
 
         self.diag_target_input = QLineEdit(probe_card)
@@ -773,13 +835,14 @@ class MainWindow(QMainWindow):
                 title=title,
                 meta_text=meta,
                 visible_actions=[(btn_text, btn_style, meta, handler)],
+                compact_vertical=True,
                 parent=container,
             )
             layout.addWidget(row)
             self._tool_rows_index.append((f"{title} {meta}".lower(), row))
 
         out_header = QHBoxLayout()
-        out_header.setContentsMargins(0, 6, 0, 0)
+        out_header.setContentsMargins(0, 4, 0, 0)
         out_title = QLabel("SALIDA DE DIAGNÓSTICO", container)
         out_title.setObjectName("SubgroupTitle")
         out_title.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
@@ -1123,8 +1186,16 @@ class MainWindow(QMainWindow):
             lambda log, t=target, p=port: net_tasks.run_tcp_port_check(t, p, log=log),
         )
 
+    def _scroll_diagnostics_to_output(self) -> None:
+        if hasattr(self, "diag_scroll") and hasattr(self, "diag_output"):
+            self.diag_scroll.ensureWidgetVisible(self.diag_output, 0, 24)
+            bar = self.diag_scroll.verticalScrollBar()
+            if bar is not None:
+                bar.setValue(bar.maximum())
+
     def _run_diagnostic(self, label: str, fn: Callable[..., str]) -> None:
         self.diag_output.setPlainText(f"Ejecutando {label}...")
+        QTimer.singleShot(0, self._scroll_diagnostics_to_output)
         worker = DiagnosticWorker(fn)
         worker.log_message.connect(self.append_log)
         worker.output_ready.connect(lambda text: self._on_diagnostic_ready(label, text))
@@ -1134,6 +1205,7 @@ class MainWindow(QMainWindow):
 
     def _on_diagnostic_ready(self, label: str, text: str) -> None:
         self.diag_output.setPlainText(text)
+        QTimer.singleShot(0, self._scroll_diagnostics_to_output)
         self.append_log(f"[COMPLETADO] {label}")
 
     def _on_diagnostic_failed(self, label: str, err: str) -> None:

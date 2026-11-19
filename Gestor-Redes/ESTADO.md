@@ -44,11 +44,11 @@ Gestor-Redes/
 ## 2. Estado Actual
 
 ### Módulos Completados
-- [x] `net_tasks.py`: inventario completo de adaptadores (`list_network_adapters`), configuración IPv4 DHCP/estática (`set_adapter_dhcp`, `set_adapter_static_ip`), configuración DNS con perfiles rápidos (`set_adapter_dns`, `DNS_PRESETS`), habilitar/deshabilitar/reiniciar adaptadores (`set_adapter_enabled`, `restart_adapter`), renovación IP/DNS (`renew_ip_and_dns`, `flush_dns_cache`), secuencias automáticas (`run_quick_repair`, `run_deep_network_cleanup`), restablecimiento Winsock/TCP-IP (`reset_winsock_and_tcpip`), acceso a `ncpa.cpl` y suite de diagnóstico (`check_internet_connectivity`, `run_ping`, `run_traceroute`, `run_nslookup`, `run_tcp_port_check`, `get_ipconfig_all`, `get_routing_table`, `get_arp_table`, `run_full_network_diagnostic`, `generate_full_diagnostic_report`).
+- [x] `net_tasks.py`: inventario completo de adaptadores (`list_network_adapters`), configuración IPv4 DHCP/estática (`set_adapter_dhcp`, `set_adapter_static_ip`), configuración DNS con perfiles rápidos (`set_adapter_dns`, `DNS_PRESETS`), habilitar/deshabilitar/reiniciar adaptadores (`set_adapter_enabled`, `restart_adapter`), renovación IP/DNS (`renew_ip_and_dns`, `flush_dns_cache`), purga de sesiones SMB/Kerberos (`purge_network_sessions`), secuencias automáticas (`run_quick_repair`, `run_deep_network_cleanup`), restablecimiento Winsock/TCP-IP (`reset_winsock_and_tcpip`), acceso a `ncpa.cpl` y suite de diagnóstico (`check_internet_connectivity`, `run_ping`, `run_traceroute`, `run_nslookup`, `run_tcp_port_check`, `get_ipconfig_all`, `get_routing_table`, `get_arp_table`, `run_full_network_diagnostic`, `generate_full_diagnostic_report`).
 - [x] `styles.py`: tema oscuro monocromático (`#0F1012` / `#17191D` / `#272A30` / `#F4F4F5`) con badges semánticos de estado y controles estilizados.
 - [x] `workers.py`: workers `QThread` asíncronos no bloqueantes con traducción amigable de errores UAC (`format_task_exception`).
 - [x] `dialogs.py`: diálogos modales para configurar IPv4/DHCP (`IPConfigDialog`), DNS con presets (`DNSConfigDialog`), detalle de adaptador (`AdapterDetailsDialog`) y visor ampliado de diagnóstico (`DiagnosticResultDialog`).
-- [x] `main.py`: elevación UAC automática + badge interactivo `"Sin UAC"`, indicador de conectividad externa en header, 3 vistas laterales (`Adaptadores de Red` sin scroll horizontal innecesario, `Renovación y Caché` con sección `SECUENCIAS AUTOMÁTICAS` y sin `ncpa.cpl` duplicado, `Diagnóstico de Red` con `Generar Reporte Completo` y exportación `.txt`), filtro rápido (`Ctrl+F`), refresco (`F5`), botón vectorial `⋮` y panel inferior de registro colapsable.
+- [x] `main.py`: elevación UAC automática + badge interactivo `"Elevar Admin"`, indicador de conectividad externa en header, 3 vistas laterales (`Adaptadores de Red` sin scroll horizontal innecesario, `Renovación y Caché` con sección `SECUENCIAS AUTOMÁTICAS` y sin `ncpa.cpl` duplicado, `Diagnóstico de Red` con `Generar Reporte Completo` y exportación `.txt`), filtro rápido (`Ctrl+F`), refresco (`F5`), botón vectorial `⋮` y panel inferior de registro colapsable.
 - [x] `requirements.txt`, `build.ps1`, `.gitignore`, `GEMINI.md` y `ESTADO.md`.
 
 ### En Progreso
@@ -62,6 +62,28 @@ Gestor-Redes/
 ---
 
 ## 3. Historial de Cambios
+
+- **2026-11-19 — v1.0.5 (Decodificación UTF-8/OEM, tolerancia de retorno parcial NSI en `netsh int ip reset` y limpieza de mensaje UAC)**:
+  - `net_tasks.py`:
+    - Actualizados `_decode_console_output()` y `_run_cmd()` para intentar decodificación `utf-8` estricta primero y hacer fallback a `oem` / `cp850` / `cp1252` (`errors="replace"`), evitando caracteres acentuados corruptos (`restableció`, `acción`, `Dirección`, `Patrón`).
+    - Agregado `is_user_admin()` (`ctypes.windll.shell32.IsUserAnAdmin() != 0`) y actualizado `UAC_PERMISSION_MSG` a `"Permisos insuficientes. Ejecutá Gestor de Redes como Administrador."`.
+    - Ajustados `_check_access_denied()` y `format_task_exception()` para no reportar falta de elevación UAC cuando el proceso ya corre como Administrador.
+    - Actualizados `_is_partial_ip_reset_success()` y `_log_partial_ip_reset_warning()` en `reset_winsock_and_tcpip` y `run_deep_network_cleanup` para detectar salidas reales en español e inglés (`"se restableci"`, `"restableciendo"`, `"reinicie el equipo"`, `"resetting"`, `"restart the computer"`, `"ok."`, `"ok\r"`, `"ok\n"`, `"ok!"`) con `returncode != 0`, registrando el detalle completo como `[ADVERTENCIA]` en el log sin lanzar error fatal.
+  - `main.py`:
+    - Eliminadas las referencias residuales a `'Sin UAC'` (`"Modo Estándar"` / `"Elevar Admin"`).
+  - Verificación aprobada con mocks de `subprocess.run` en `cp850` y `utf-8` (`AST_OK`, `RESET_SPANISH_CP850_OK`, `DEEP_CLEANUP_SPANISH_CP850_OK`, `RESET_SPANISH_UTF-8_OK`, `DEEP_CLEANUP_SPANISH_UTF-8_OK`, `NON_ADMIN_OK`) y eliminación de scripts temporales de test.
+  - Nota de compilación: `dist\GestorRedes.exe` no pudo sobreescribirse aún porque una instancia elevada de `GestorRedes.exe` permanece abierta (`Acceso denegado`).
+
+- **2026-11-19 — v1.0.4 (Pulido visual de tarjetas, purga SMB/Kerberos y recompilación)**:
+  - `main.py` y `styles.py`:
+    - `ActionRow`: eliminada la restricción de espacio cuando no hay badges en la línea superior (`title_label` con `Expanding` horizontal y `stretch=1` sin `addStretch` competidor), evitando saltos de línea innecesarios en *Renovación y Caché* y *Diagnóstico de Red*.
+    - Adaptadores de Red (`badges_in_meta=True`, `compact_buttons=True`): movidos los badges de estado (`Conectado`/`Desconectado`) y modo (`DHCP`/`Estática`) a la fila inferior junto a `meta_label` (`setWordWrap(True)` + `Ignored` horizontal), dejando el nombre del adaptador solo en la línea superior; agregado estilo `QPushButton[compact="true"]` (`padding: 4px 8px`) en `styles.py` y compactado separador `" | "` en `NetworkAdapter.summary_line()` (`net_tasks.py`) para mostrar la MAC completa sin truncamiento en `1080x680`.
+    - Vista *Diagnóstico de Red*: compactado el padding vertical (`compact_vertical=True`, márgenes y spacing reducidos) para que el encabezado y las primeras líneas de `SALIDA DE DIAGNÓSTICO` sean visibles sin scrollear en `1080x680` (`145 px` visibles en offscreen), más scroll automático hacia `diag_output` (`_scroll_diagnostics_to_output`) al iniciar o completar pruebas.
+  - `net_tasks.py` y `main.py`:
+    - Agregada función `purge_network_sessions` (`net use * /delete /y` y `klist purge` con `shell=False` y `CREATE_NO_WINDOW`, tolerando ausencia de sesiones SMB o tickets Kerberos) y su fila **"Purgar Sesiones de Red (SMB / Kerberos)"** en *Renovación y Caché*.
+  - Validación y compilación:
+    - Smoke test offscreen (`verify_ui.py`) aprobado (`AST_OK`, `PURGE_MOCK_OK`, `LAYOUT_OK_1040x620`, `LAYOUT_OK_1080x680`, `ALL_CHECKS_PASSED`).
+    - Recompilado `dist\GestorRedes.exe` mediante `build.ps1` (34.273.261 bytes).
 
 - **2026-11-18 — v1.0.3 (Corrección de recorte horizontal en QScrollArea y ActionRow)**:
   - `main.py`:

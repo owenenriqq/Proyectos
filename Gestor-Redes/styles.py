@@ -227,6 +227,10 @@ QPushButton {
     font-weight: 600;
 }
 
+QPushButton[compact="true"] {
+    padding: 4px 8px;
+}
+
 QPushButton:hover {
     background-color: #2A2E37;
     border-color: #3E434F;
