@@ -95,7 +95,8 @@ function Stop-OfficeProcesses {
 
     $targetProcesses = @(
         'winword', 'excel', 'outlook', 'powerpnt',
-        'msaccess', 'mspub', 'onenote', 'teams', 'ms-teams'
+        'msaccess', 'mspub', 'onenote', 'winproj',
+        'visio', 'teams', 'ms-teams'
     )
 
     Write-SanitizerLog -Message 'Verificando procesos activos de Microsoft Office...' -Level 'INFO'
@@ -142,7 +143,8 @@ $modulesDir = Join-Path -Path $ScriptRoot -ChildPath 'modules'
 $requiredModules = @(
     'Get-OfficeDiagnostics.ps1',
     'Clear-IdentityCache.ps1',
-    'Reset-OfficeLicenses.ps1'
+    'Reset-OfficeLicenses.ps1',
+    'Uninstall-OfficeProducts.ps1'
 )
 
 foreach ($mod in $requiredModules) {
@@ -170,7 +172,7 @@ $backupDllDir = Join-Path -Path $LogsDir -ChildPath 'backup_dll'
 function Show-Menu {
     Write-Host ''
     Write-Host '==================================================================' -ForegroundColor White
-    Write-Host '                     M365-Sanitizer v1.1                          ' -ForegroundColor White
+    Write-Host '                     M365-Sanitizer v1.2                          ' -ForegroundColor White
     Write-Host '        Saneamiento de Licencias e Identidad de Office            ' -ForegroundColor White
     Write-Host '==================================================================' -ForegroundColor White
     Write-Host '1. Ejecutar diagnóstico de entorno (solo lectura)'
@@ -180,6 +182,7 @@ function Show-Menu {
     Write-Host '5. Restablecer licencias - Modo Total (elimina todas las claves)'
     Write-Host '6. Saneamiento completo Selectivo (Pasos 2 -> 3 -> 4) [Recomendado]'
     Write-Host '7. Saneamiento completo Total (Pasos 2 -> 3 -> 5)'
+    Write-Host '8. Desinstalar productos de Office / Project / Visio (Selectivo o Total)'
     Write-Host '0. Salir'
     Write-Host '==================================================================' -ForegroundColor White
 }
@@ -243,6 +246,9 @@ do {
             } else {
                 Write-SanitizerLog -Message 'Saneamiento completo Total cancelado por el operador.' -Level 'WARN'
             }
+        }
+        '8' {
+            Uninstall-OfficeProducts -Mode 'Interactivo' -BackupRoot $backupDllDir -Logger $loggerCallback -Confirm:$false -WhatIf:$WhatIfPreference
         }
         '0' {
             Write-SanitizerLog -Message 'Finalizando sesión de M365-Sanitizer.' -Level 'INFO'
