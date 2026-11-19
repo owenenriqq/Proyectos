@@ -1,4 +1,4 @@
-[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+﻿[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 $Host.UI.RawUI.WindowTitle = "Lanzador Antigravity CLI"
 
 # 1. Detectar automáticamente la raíz de Proyectos en Casa o Trabajo
