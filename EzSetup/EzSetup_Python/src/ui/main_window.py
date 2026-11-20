@@ -22,6 +22,7 @@ from PyQt6.QtGui import (
     QShortcut,
 )
 from PyQt6.QtWidgets import (
+    QApplication,
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -42,7 +43,7 @@ from PyQt6.QtWidgets import (
 
 from src import system_tasks
 from src.config import AppConfig, ConfigError
-from src.ui.dialogs import CredentialDialog, ProgressDialog
+from src.ui.dialogs import CredentialDialog, PrinterInstallDialog, ProgressDialog
 from src.workers import (
     DownloadWorker,
     FileCopyWorker,
@@ -59,7 +60,7 @@ ActionWidgetSpec = tuple[str, str, str, ActionCallback]
 
 def _create_more_dots_icon(color: str = "#E4E4E7") -> QIcon:
     """Dibuja vectorialmente un ícono de 3 puntos verticales centrado (⋮)."""
-    pixmap = QPixmap(18, 18)
+    pixmap = QPixmap(16, 16)
     pixmap.fill(Qt.GlobalColor.transparent)
 
     painter = QPainter(pixmap)
@@ -67,8 +68,8 @@ def _create_more_dots_icon(color: str = "#E4E4E7") -> QIcon:
     painter.setPen(Qt.PenStyle.NoPen)
     painter.setBrush(QBrush(QColor(color)))
 
-    for y in (4.0, 9.0, 14.0):
-        painter.drawEllipse(QPointF(9.0, y), 1.6, 1.6)
+    for y in (3.5, 8.0, 12.5):
+        painter.drawEllipse(QPointF(8.0, y), 1.5, 1.5)
 
     painter.end()
     return QIcon(pixmap)
@@ -333,6 +334,11 @@ class MainWindow(QMainWindow):
         self.active_task_label.setVisible(False)
         header.addWidget(self.active_task_label)
 
+        copy_btn = QPushButton("Copiar", panel)
+        copy_btn.setToolTip("Copiar contenido completo del registro al portapapeles")
+        copy_btn.clicked.connect(lambda _c=False: self._copy_logs())
+        header.addWidget(copy_btn)
+
         clear_btn = QPushButton("Limpiar", panel)
         clear_btn.clicked.connect(self._clear_logs)
         header.addWidget(clear_btn)
@@ -372,6 +378,16 @@ class MainWindow(QMainWindow):
             self.toggle_log_btn.setText("Ocultar Log")
             self._log_panel.setMaximumHeight(16777215)
             self.splitter.setSizes([420, 180])
+
+    def _copy_logs(self) -> None:
+        clipboard = QApplication.clipboard()
+        if clipboard is None:
+            return
+        text = self.log_output.toPlainText()
+        clipboard.setText(text)
+        self.last_log_label.setText(
+            "Log copiado al portapapeles" if text.strip() else "Log vacío copiado al portapapeles"
+        )
 
     def _clear_logs(self) -> None:
         self.log_output.clear()
@@ -564,7 +580,7 @@ class MainWindow(QMainWindow):
             return explicit
 
         act_type = str(act.get("type", "")).lower()
-        if act_type in {"exe", "msi", "iso", "ps1", "reg"}:
+        if act_type in {"exe", "msi", "iso", "ps1", "reg", "explorer", "open", "bat"}:
             return str(act.get("path", ""))
         if act_type == "copy":
             return f"{act.get('source', '')} -> {act.get('dest', '')}"
@@ -644,6 +660,30 @@ class MainWindow(QMainWindow):
                 lambda cfg, log: system_tasks.run_generic_reg(p, lbl, log, config=cfg),
             )
 
+        if act_type == "explorer":
+            path = str(act.get("path", ""))
+            select = bool(act.get("select", False))
+            return lambda p=path, sel=select, lbl=full_label: self._run_task(
+                lbl,
+                lambda cfg, log: system_tasks.run_generic_explorer(
+                    p, lbl, select=sel, log=log, config=cfg
+                ),
+            )
+
+        if act_type == "open":
+            path = str(act.get("path", ""))
+            return lambda p=path, lbl=full_label: self._run_task(
+                lbl,
+                lambda cfg, log: system_tasks.run_generic_open(p, lbl, log=log, config=cfg),
+            )
+
+        if act_type == "bat":
+            path = str(act.get("path", ""))
+            return lambda p=path, lbl=full_label: self._run_task(
+                lbl,
+                lambda cfg, log: system_tasks.run_generic_bat(p, lbl, log=log, config=cfg),
+            )
+
         if act_type == "copy":
             src = str(act.get("source", ""))
             dst = str(act.get("dest", ""))
@@ -679,6 +719,8 @@ class MainWindow(QMainWindow):
                 return self._start_extract_produccion_zip
             if task_name == "open_credentials_dialog":
                 return self._open_credentials_dialog
+            if task_name == "open_printer_dialog":
+                return self._open_printer_dialog
             if task_name == "refresh_dotnet35_status":
                 return self._refresh_dotnet_badge
 
@@ -852,9 +894,17 @@ class MainWindow(QMainWindow):
         enc_path = self.config.resolve_credentials_enc_path()
         for row in self._creds_rows:
             if enc_path is not None:
-                row.set_badge("Almacén Cifrado", "RowBadgeOk")
+                row.set_badge(
+                    "Almacén Cifrado",
+                    "RowBadgeOk",
+                    tooltip=f"Ruta resuelta: {enc_path}",
+                )
             else:
-                row.set_badge("Modo manual", "RowBadgeMuted")
+                row.set_badge(
+                    "Modo manual",
+                    "RowBadgeMuted",
+                    tooltip="No se detectó credentials.enc en rutas locales, paquete interno ni UNC",
+                )
 
     def append_log(self, message: str) -> None:
         ts = datetime.now().strftime("%H:%M:%S")
@@ -1030,7 +1080,7 @@ class MainWindow(QMainWindow):
         worker.start()
 
     def _open_credentials_dialog(self) -> None:
-        dialog = CredentialDialog(self.config, self)
+        dialog = CredentialDialog(self.config, self, log_callback=self.append_log)
         if dialog.exec() != CredentialDialog.DialogCode.Accepted:
             return
 
@@ -1049,6 +1099,17 @@ class MainWindow(QMainWindow):
             return f"Se registraron {len(entries)} credencial(es) correctamente."
 
         self._run_task("Registro de Credenciales", _apply_all)
+
+    def _open_printer_dialog(self) -> None:
+        dialog = PrinterInstallDialog(self.config, self)
+        if dialog.exec() != PrinterInstallDialog.DialogCode.Accepted:
+            return
+
+        selected = dialog.get_selected_printers()
+        self._run_task(
+            f"Instalación de Impresoras ({len(selected)})",
+            lambda cfg, log: system_tasks.install_network_printers(cfg, selected, log),
+        )
 
     def closeEvent(self, event: QCloseEvent) -> None:
         self._search_timer.stop()

@@ -274,14 +274,14 @@ class AppConfig:
         return resolve_app_root() / filename
 
     def resolve_credentials_enc_path(self) -> Path | None:
-        """Busca credentials.enc en el directorio local, carpeta padre (dist\\..), empaquetado o UNC."""
+        """Busca credentials.enc por orden: externo junto al .exe (o padre de dist\\), empaquetado (_MEIPASS) o UNC."""
         filename = self.get_local_path_raw("credentials_enc_file")
         app_root = resolve_app_root()
-        candidates: list[Path] = [
-            app_root / filename,
-            app_root.parent / filename,
-            resolve_bundle_root() / filename,
-        ]
+        candidates: list[Path] = [app_root / filename]
+        if app_root.name.lower() == "dist" and app_root.parent != app_root:
+            candidates.append(app_root.parent / filename)
+        candidates.append(resolve_bundle_root() / filename)
+
         try:
             unc_raw = str(self.get_unc("eidico", "credentials_enc_unc") or "").strip()
             if unc_raw:
@@ -291,8 +291,15 @@ class AppConfig:
 
         for candidate in candidates:
             try:
-                if candidate.is_file():
+                if os.path.isfile(candidate):
                     return candidate
             except OSError:
                 continue
         return None
+
+    def get_printers_config(self) -> dict[str, Any]:
+        """Retorna la sección de configuración de impresoras de red."""
+        printers = self._data.get("printers", {})
+        if not isinstance(printers, dict):
+            raise ConfigError("La sección 'printers' en config.json debe ser un objeto.")
+        return printers

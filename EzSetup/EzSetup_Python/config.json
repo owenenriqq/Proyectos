@@ -1,9 +1,9 @@
 {
   "app": {
     "name": "EzSetup",
-    "version": "2.4.0",
+    "version": "2.5.0",
     "title": "EzSetup",
-    "app_user_model_id": "Eidico.EzSetup.2.4",
+    "app_user_model_id": "Eidico.EzSetup.2.5",
     "copy_chunk_size_bytes": 65536,
     "server_check_interval_ms": 15000,
     "internet_probe_host": "1.1.1.1"
@@ -150,6 +150,68 @@
       "hdsentinel_crack_zip": "\\\\172.30.0.13\\it\\SOFTWARE\\Hard Disk Sentinel Pro 5.50 Build 10482 + Crack\\Crack.zip",
       "hdsentinel_exe_name": "HDSentinel.exe"
     }
+  },
+  "printers": {
+    "hp_todas_exe": "\\\\172.30.0.13\\areas\\0-IT\\Impresoras\\HP-Todas.exe",
+    "drivers": {
+      "hp_upd": {
+        "label": "HP Universal Printing PCL 6",
+        "driver_name": "HP Universal Printing PCL 6",
+        "inf_path": "\\\\172.30.0.13\\areas\\0-IT\\Impresoras\\HP-UPD\\hpcu220u.inf"
+      },
+      "ricoh_501": {
+        "label": "RICOH MP 501 PCL 6",
+        "driver_name": "RICOH MP 501 PCL 6",
+        "inf_path": "\\\\172.30.0.13\\areas\\0-IT\\Impresoras\\501\\oemsetup.inf"
+      },
+      "ricoh_2554": {
+        "label": "RICOH MP 2554 PCL 6",
+        "driver_name": "RICOH MP 2554 PCL 6",
+        "inf_path": "\\\\172.30.0.13\\areas\\0-IT\\Impresoras\\2554\\oemsetup.inf"
+      }
+    },
+    "catalog": [
+      {
+        "name": "HP Recepción",
+        "ip": "172.30.200.15",
+        "driver_key": "hp_upd"
+      },
+      {
+        "name": "HP Loteo",
+        "ip": "172.30.200.4",
+        "driver_key": "hp_upd"
+      },
+      {
+        "name": "HP Vivienda",
+        "ip": "172.30.200.10",
+        "driver_key": "hp_upd"
+      },
+      {
+        "name": "HP Directorio",
+        "ip": "172.30.200.13",
+        "driver_key": "hp_upd"
+      },
+      {
+        "name": "RICOH MP 501 PCL 6 P2",
+        "ip": "172.30.200.30",
+        "driver_key": "ricoh_501"
+      },
+      {
+        "name": "RICOH MP 501 PCL 6 PB",
+        "ip": "172.30.200.32",
+        "driver_key": "ricoh_501"
+      },
+      {
+        "name": "RICOH MP 501 PCL 6 P3",
+        "ip": "172.30.200.33",
+        "driver_key": "ricoh_501"
+      },
+      {
+        "name": "RICOH MP 2554 PCL 6",
+        "ip": "172.30.200.31",
+        "driver_key": "ricoh_2554"
+      }
+    ]
   },
   "menus": [
     {
@@ -384,6 +446,30 @@
               ]
             }
           ]
+        },
+        {
+          "title": "IMPRESORAS",
+          "items": [
+            {
+              "id": "office_printers",
+              "title": "Impresoras de Oficina",
+              "actions": [
+                {
+                  "label": "HP-Todas.exe",
+                  "style": "",
+                  "type": "exe",
+                  "path": "\\\\172.30.0.13\\areas\\0-IT\\Impresoras\\HP-Todas.exe"
+                },
+                {
+                  "label": "Instalar por IP",
+                  "style": "PrimaryButton",
+                  "type": "task",
+                  "task": "open_printer_dialog",
+                  "tooltip": "Instalar impresoras HP y Ricoh de oficina por IP mediante pnputil y PrintManagement"
+                }
+              ]
+            }
+          ]
         }
       ]
     },
@@ -445,6 +531,13 @@
                   "tooltip": "Eliminar carpeta temporal NitroPDF del Escritorio"
                 },
                 {
+                  "label": "Patch",
+                  "style": "",
+                  "type": "explorer",
+                  "path": "\\\\172.30.0.13\\areas\\0-IT\\NitroPDF",
+                  "tooltip": "Abrir carpeta NitroPDF en el Explorador de Windows"
+                },
+                {
                   "label": "Instalar",
                   "style": "PrimaryButton",
                   "type": "task",
@@ -485,13 +578,15 @@
             {
               "id": "autocad_2021",
               "title": "Autodesk AutoCAD 2021",
+              "primary_count": 3,
               "actions": [
                 {
-                  "label": "Instructivo",
+                  "label": "Crack",
                   "style": "",
-                  "type": "task",
-                  "task": "open_autocad_instructions",
-                  "tooltip": "Abrir Instrucciones.txt de AutoCAD 2021"
+                  "type": "explorer",
+                  "select": true,
+                  "path": "\\\\172.30.0.13\\it\\SOFTWARE\\TECNICA\\Autodesk.AutoCAD.2021.Multilingual.Incl.Kg\\crack.zip",
+                  "tooltip": "Abrir ubicación de crack.zip en el Explorador de Windows"
                 },
                 {
                   "label": "Firewall",
@@ -506,6 +601,13 @@
                   "type": "iso",
                   "path": "\\\\172.30.0.13\\it\\SOFTWARE\\TECNICA\\Autodesk.AutoCAD.2021.Multilingual.Incl.Kg\\Autodesk_AutoCAD_2021_ML_x64.iso",
                   "setup_rel": "Setup.exe"
+                },
+                {
+                  "label": "Instructivo",
+                  "style": "",
+                  "type": "task",
+                  "task": "open_autocad_instructions",
+                  "tooltip": "Abrir Instrucciones.txt de AutoCAD 2021"
                 }
               ]
             },
@@ -584,7 +686,7 @@
               "title": "Hard Disk Sentinel Pro",
               "actions": [
                 {
-                  "label": "Copiar EXE",
+                  "label": "Crack",
                   "style": "",
                   "type": "task",
                   "task": "hdsentinel_replace_exe",
@@ -618,16 +720,60 @@
               ]
             },
             {
-              "id": "renew_ip_dns",
-              "title": "Adaptadores de Red (IP y DNS)",
+              "id": "network_manager",
+              "title": "Gestor de Redes",
               "actions": [
                 {
-                  "label": "Renovar",
-                  "style": "PrimaryButton",
+                  "label": "Renovar IP/DNS",
+                  "style": "",
                   "type": "task",
                   "task": "renew_ip_dns",
                   "refresh_network": true,
                   "tooltip": "Ejecutar ipconfig /flushdns, /release, /renew y /registerdns y verificar conectividad"
+                },
+                {
+                  "label": "Abrir",
+                  "style": "PrimaryButton",
+                  "type": "exe",
+                  "path": "\\\\172.30.0.13\\it\\CMD\\Utilidades\\GestorRedes.exe"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "title": "LICENCIAS Y OFFICE",
+          "items": [
+            {
+              "id": "sanitizer_o365",
+              "title": "Sanitizer O365",
+              "actions": [
+                {
+                  "label": "Ejecutar",
+                  "style": "PrimaryButton",
+                  "type": "bat",
+                  "path": "\\\\172.30.0.13\\it\\CMD\\Utilidades\\Suite-M365-Saneamiento\\Iniciar-M365Sanitizer.bat",
+                  "tooltip": "Ejecutar Iniciar-M365Sanitizer.bat desde ruta UNC usando pushd/popd"
+                }
+              ]
+            },
+            {
+              "id": "kms_activation",
+              "title": "Activación KMS",
+              "actions": [
+                {
+                  "label": "KMS.txt",
+                  "style": "",
+                  "type": "open",
+                  "path": "\\\\172.30.0.13\\it\\CMD\\KMS\\KMS.txt",
+                  "tooltip": "Abrir archivo KMS.txt"
+                },
+                {
+                  "label": "Ejecutar",
+                  "style": "PrimaryButton",
+                  "type": "bat",
+                  "path": "\\\\172.30.0.13\\it\\CMD\\KMS\\kms.bat",
+                  "tooltip": "Ejecutar kms.bat desde ruta UNC usando pushd/popd"
                 }
               ]
             }

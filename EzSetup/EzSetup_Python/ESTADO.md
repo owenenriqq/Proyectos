@@ -2,14 +2,14 @@
 
 ## 1. Resumen y Arquitectura
 
-**EzSetup v2.0.0** es la migración completa de los scripts heredados de aprovisionamiento (`EzSetup_CMD_PS\`, solo lectura) a una aplicación de escritorio moderna para Windows 10/11 desarrollada en **Python 3.12 + PyQt6**, con configuración centralizada, ejecución asíncrona no bloqueante y exclusión total de software o activadores no oficiales.
+**EzSetup v2.5.0** es la migración completa de los scripts heredados de aprovisionamiento (`EzSetup_CMD_PS\`, solo lectura) a una aplicación de escritorio moderna para Windows 10/11 desarrollada en **Python 3.12 + PyQt6**, con configuración centralizada, ejecución asíncrona no bloqueante y exclusión total de software o activadores no oficiales.
 
 ### Stack Tecnológico
 - **Lenguaje**: Python 3.12 (`C:\Users\oenrique\AppData\Local\Programs\Python\Python312\python.exe`, aislado en `.venv\`)
 - **Interfaz Gráfica**: `PyQt6` (6.12.1) con diseño horizontal minimalista y tema oscuro QSS (`src/ui/styles.py`)
 - **Red / Descargas**: `requests` (2.34.2) por streaming con archivo temporal `.tmp` y cancelación
-- **Cifrado de Credenciales**: `cryptography` (50.0.2) — `AES-256-GCM` + `PBKDF2HMAC-SHA256` (600,000 iteraciones) en `src/crypto_creds.py`
-- **Integración Windows (COM / ACL / Registro)**: `pywin32` (312), `winreg`, `ctypes`, `cmdkey`, `regedit.exe`, `powercfg`
+- **Cifrado de Credenciales**: `cryptography` (50.0.2) — `AES-256-GCM` + `PBKDF2HMAC-SHA256` (600,000 iteraciones) en `src/crypto_creds.py` y fachada `src/crypto_store.py`
+- **Integración Windows (COM / ACL / Registro / Impresoras)**: `pywin32` (312), `winreg`, `ctypes`, `cmdkey`, `regedit.exe`, `powercfg`, `pnputil.exe`, `PrintManagement`
 - **Empaquetado**: `pyinstaller` (6.22.3)
 
 ### Árbol de Carpetas
@@ -20,18 +20,19 @@ EzSetup_Python/
 │   └── EzSetup.ico             # Ícono oficial de la aplicación
 ├── src/
 │   ├── __init__.py
-│   ├── config.py               # Carga/validación de config.json, KnownFolders y resolución de credentials.enc
-│   ├── crypto_creds.py         # Cifrado/descifrado AES-256-GCM + PBKDF2HMAC-SHA256 (600k iteraciones)
+│   ├── config.py               # Carga/validación de config.json, KnownFolders y resolución portable de credentials.enc
+│   ├── crypto_creds.py         # Cifrado/descifrado AES-256-GCM + diferencia InvalidTag vs errores E/S
+│   ├── crypto_store.py         # Fachada pública del almacén cifrado (CredentialIntegrityError / CredentialIOError)
 │   ├── workers.py              # QThreads: ServerCheckWorker, DownloadWorker, FileCopyWorker, IsoMountWorker, TaskWorker
-│   ├── system_tasks.py         # Tareas administrativas Windows (cmdkey, COM .lnk, ACL S-1-5-32-545, RegAsm, Firewall, etc.)
+│   ├── system_tasks.py         # Tareas administrativas Windows (impresoras IP/pnputil, pushd .bat, explorer, cmdkey, etc.)
 │   └── ui/
 │       ├── __init__.py
-│       ├── main_window.py      # UI minimalista de filas horizontales compactas, tooltips y log colapsado por defecto
-│       ├── dialogs.py          # CredentialDialog (credentials.enc o manual) y ProgressDialog (con cancelación)
-│       └── styles.py           # Hoja de estilos QSS minimalista (tema oscuro)
+│       ├── main_window.py      # UI minimalista, ícono ⋮ 16x16, botón Copiar log, tooltips con ruta resuelta y acciones UNC
+│       ├── dialogs.py          # CredentialDialog (validación previa + logs), PrinterInstallDialog y ProgressDialog
+│       └── styles.py           # Hoja de estilos QSS minimalista (tema monocromático oscuro)
 ├── .gitignore                  # Excluye .venv/, build/, dist/, *.spec, *.enc, etc.
-├── build.ps1                   # Script de compilación PyInstaller
-├── config.json                 # Rutas UNC, URLs, rutas locales, servidores y menús centralizados
+├── build.ps1                   # Script de compilación PyInstaller (--add-data condicional de credentials.enc)
+├── config.json                 # Rutas UNC, URLs, rutas locales, servidores, impresoras y menús centralizados
 ├── ESTADO.md                   # Bitácora viva del proyecto
 ├── GEMINI.md                   # Reglas obligatorias de desarrollo y seguridad
 ├── main.py                     # Entrypoint con elevación UAC automática y AppUserModelID
@@ -53,27 +54,33 @@ EzSetup_Python/
 ### Módulos Completados
 - [x] Entorno virtual `.venv` creado con Python 3.12 e instalación de `PyQt6`, `requests`, `pywin32`, `pyinstaller` y `cryptography`.
 - [x] `GEMINI.md`, `.gitignore` (excluyendo `*.enc`), `requirements.txt`, `build.ps1` y copia de `assets\EzSetup.ico`.
-- [x] `config.json` centralizado (versión `2.4.0`) con catálogo extensible en **4 categorías**, subgrupo `CONECTIVIDAD Y ACCESOS`, subgrupos `OFIMÁTICA` y `DISEÑO`, nombres estandarizados (`Nitro PDF Pro` sin badge, `.NET Framework 3.5`, `Hard Disk Sentinel Pro`), ejecución directa de `Renovar` sin confirmación y detección universal para AWS VPN Client.
-- [x] `src\config.py`: validación de esquema JSON, `get_allowed_unc_hosts()`, `get_install_checks()`, `KnownFolders` y resolución de `credentials.enc` incluyendo carpeta padre (`dist\..`).
-- [x] `src\crypto_creds.py` y `manage_creds.py`: módulo AES-256-GCM + PBKDF2HMAC-SHA256 (600,000 iteraciones, salt 16 B, nonce 12 B) y CLI interactivo para `credentials.enc`.
+- [x] `config.json` centralizado (versión `2.5.0`) con catálogo extensible en **4 categorías**, subgrupos `IMPRESORAS` (HP-Todas.exe + 8 impresoras catálogo/driver) y `LICENCIAS Y OFFICE` (`Sanitizer O365` y `Activación KMS`), `Gestor de Redes`, `Patch` de Nitro PDF Pro, `Crack` en AutoCAD 2021 y Hard Disk Sentinel Pro.
+- [x] `src\config.py`: validación de esquema JSON, `get_printers_config()`, `get_allowed_unc_hosts()`, `get_install_checks()`, `KnownFolders` y resolución portable de `credentials.enc` (externo junto al `.exe` / padre de `dist\`, `sys._MEIPASS`, UNC).
+- [x] `src\crypto_creds.py`, `src\crypto_store.py` y `manage_creds.py`: AES-256-GCM + PBKDF2HMAC-SHA256 (600,000 iteraciones) con validación previa `os.path.isfile` y separación explícita entre `CredentialIntegrityError` (`InvalidTag`) y `CredentialIOError` (`OSError`/`FileNotFoundError`).
 - [x] `src\workers.py`: workers `QThread` reutilizables (`ServerCheckWorker`, `InstalledSoftwareCheckWorker`, `DownloadWorker`, `FileCopyWorker`, `ZipExtractWorker`, `IsoMountWorker`, `TaskWorker`) con validación UNC, `shell=False` y traducción amigable de `PermissionError`.
-- [x] `src\system_tasks.py`: tareas administrativas con `shell=False` estricto, validación UNC (`UnauthorizedUNCHostError`), manejo amigable de `PermissionError` UAC (`format_task_exception`), registro/limpieza automática de temporales, detección universal de software + lectura de versión (`_get_file_version`, servicios, `Uninstall`), purga SMB/Kerberos previa a `cmdkey`, `renew_ip_and_dns`, `create_network_shortcuts`, `apply_autocad_firewall_block`, `hdsentinel_replace_exe`, etc.
-- [x] `src\ui\`: paleta monocromática limpia (`#0F1012` / `#17191D` / `#F4F4F5`), header limpio (`EzSetup`, `windowTitle` `"EzSetup v2.4.0"`, recarga `F5`), badge interactivo `"Sin UAC"`, botón cuadrado `32x30` con ícono vectorial de 3 puntos verticales (`⋮`), buscador con debounce de 150ms, badges `"Instalado"` con versión en tooltip, e íconos vectoriales de ojo en `CredentialDialog`.
+- [x] `src\system_tasks.py`: tareas administrativas con `shell=False` estricto (`install_network_printers` con `pnputil.exe` + PowerShell `PrintManagement`, `run_generic_bat` con `pushd`/`call`/`popd`, `run_generic_explorer`, `run_generic_open`, detección universal AWS VPN + lectura de versión, purga SMB/Kerberos, `renew_ip_and_dns`, `apply_autocad_firewall_block`, etc.).
+- [x] `src\ui\`: paleta monocromática limpia (`#0F1012` / `#17191D` / `#F4F4F5`), `windowTitle` `"EzSetup v2.5.0"`, botón `"Copiar"` en barra de log, tooltip del badge `"Almacén Cifrado"` con la ruta resuelta de `credentials.enc`, `PrinterInstallDialog` (catálogo + IP manual), logs técnicos en `CredentialDialog`, ícono `⋮` centrado sobre `QPixmap(16, 16)` y buscador con debounce de 150ms.
 - [x] `main.py` y `build.ps1`: elevación UAC y compilación PyInstaller optimizada con exclusiones de módulos PyQt6 no utilizados (`QtWebEngine*`, `QtMultimedia`, `Qt3DCore`, `QtQml`, `QtQuick`).
-- [x] Verificación técnica aprobada: `py_compile` sobre los 11 `.py`, escaneo de cero hardcoding, paleta monocromática, ícono vectorial de 3 puntos verticales, microcopy, `Renovar` sin confirmación, resolución de `credentials.enc` desde `dist\` y prueba headless (`QT_QPA_PLATFORM=offscreen`) de `MainWindow`.
+- [x] Verificación técnica aprobada (`v2.5.0`): `py_compile` sobre los 12 `.py`, escaneo de cero hardcoding y cero `shell=True`, validación de `crypto_store` (`CredentialIOError` / `CredentialIntegrityError`), prueba headless (`QT_QPA_PLATFORM=offscreen`) de `MainWindow` (`EzSetup v2.5.0`, botón `"Copiar"` log, filas nuevas y menú `⋮` 16x16), `PrinterInstallDialog` (8 impresoras + IP manual) y compilación exitosa con `build.ps1` (`dist\EzSetup.exe`, `dist\config.json` y `dist\credentials.enc`).
 
 ### En Progreso
 - Ninguno en curso al cierre de esta sesión.
 
 ### Pendientes
 - [ ] Completar en `config.json` las rutas UNC definitivas de `unc_paths.tecnica` actualmente vacías (`revit_2021_iso`, `dwg_trueview_2020_installer`, `sketchup_installer`).
-- [ ] Ejecutar pruebas funcionales interactivas en red corporativa/VPN contra `172.30.0.13` y `172.31.11.146` (descargas HTTP, montaje ISO/IMG, copia de `EidicoPrueba.EXE`, permisos `Sol Sistemas`, `RegAsm` y `cmdkey`).
-- [ ] Compilar `dist\EzSetup.exe` mediante `build.ps1` y validar la ejecución del binario empaquetado en un equipo Windows 10/11 limpio.
+- [ ] Ejecutar pruebas funcionales interactivas en red corporativa/VPN contra `172.30.0.13` y `172.31.11.146` (descargas HTTP, montaje ISO/IMG, instalación de impresoras IP vía `pnputil`/`PrintManagement`, scripts `.bat` por `pushd`, copia de `EidicoPrueba.EXE`, permisos `Sol Sistemas`, `RegAsm` y `cmdkey`).
+- [ ] Validar la ejecución de `dist\EzSetup.exe` compilado en un equipo Windows 10/11 limpio desde pendrive.
 
 ---
 
 ## 3. Historial de Cambios
 
+- **2026-11-20 — v2.5.0 (Portabilidad en Pendrive, Instalador de Impresoras IP, Botón Copiar Log y Nuevas Opciones)**:
+  - Actualizado `build.ps1` para cerrar instancias previas de `EzSetup.exe`, empaquetar condicionalmente `credentials.enc` mediante `--add-data "credentials.enc;."` (si existe en la raíz del proyecto) y copiarlo junto a `dist\config.json`.
+  - Reforzado `src\config.py` (`resolve_credentials_enc_path`), `src\crypto_creds.py`, `src\crypto_store.py` y `CredentialDialog` (`src\ui\dialogs.py`): verificación previa `os.path.isfile`, diferenciación explícita entre `CredentialIntegrityError` (`InvalidTag`) y `CredentialIOError` (`OSError`/`FileNotFoundError`), registro de detalle técnico en log y tooltip en `"Almacén Cifrado"` con la ruta resuelta.
+  - Centrado el ícono vectorial `⋮` sobre `QPixmap(16, 16)` con `setIconSize(QSize(16, 16))` (`src\ui\main_window.py`) manteniendo `padding: 0px; min-width/max-width: 32px; min-height/max-height: 30px;` en `src\ui\styles.py`, y agregado botón `"Copiar"` en la barra inferior de log (`QApplication.clipboard()`).
+  - Agregado subgrupo `IMPRESORAS` (`Impresoras de Oficina`: `"HP-Todas.exe"` y `"Instalar por IP"`), sección `printers` en `config.json` (drivers `HP-UPD`, `Ricoh 501`, `Ricoh 2554` y 8 impresoras), diálogo modal `PrinterInstallDialog` (selección múltiple + IP manual) e instalador `install_network_printers` en `src\system_tasks.py` (`pnputil.exe` + PowerShell `PrintManagement` con `shell=False`).
+  - Incorporados nuevos accesos y renombrados en `config.json` y `src\system_tasks.py`: `"Patch"` en Nitro PDF Pro (`explorer` a `\\172.30.0.13\areas\0-IT\NitroPDF`), `"Crack"` (`explorer /select` sobre `crack.zip` con fallback a la carpeta contenedora) visible y `"Instructivo"` en menú `⋮` para AutoCAD 2021, `"Crack"` en Hard Disk Sentinel Pro, `"Gestor de Redes"` (`[Renovar IP/DNS]` + `[Abrir]`) y subgrupo `LICENCIAS Y OFFICE` (`Sanitizer O365` y `Activación KMS` con `"KMS.txt"` vía `os.startfile` y `"Ejecutar"` mediante `cmd.exe /c pushd ... && call ... & popd`).
 - **2026-11-18 — v2.4.0 (Paleta Monocromática, Ícono `⋮` Vectorial, Microcopy y `credentials.enc` en `dist\`)**:
   - Renovada completamente la hoja de estilos QSS (`src\ui\styles.py`) a una paleta monocromática neutra (`#0F1012`, `#17191D`, `#272A30`, `#24272E`, `#F4F4F5`, `#2E323B`, `#1F2228`), reservando verde/ámbar/rojo únicamente para badges de estado.
   - Reemplazado el botón de texto `⋯` por un botón `32x30` con ícono vectorial de 3 puntos verticales (`_create_more_dots_icon` vía `QPainter`) en `src\ui\main_window.py`.

@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import ipaddress
+import os
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from PyQt6.QtCore import QPointF, QSize, Qt, pyqtSignal
 from PyQt6.QtGui import QColor, QIcon, QPainter, QPainterPath, QPen, QPixmap
@@ -21,13 +23,19 @@ from PyQt6.QtWidgets import (
     QProgressBar,
     QPushButton,
     QRadioButton,
+    QScrollArea,
     QStackedWidget,
     QVBoxLayout,
     QWidget,
 )
 
 from src.config import AppConfig
-from src.crypto_creds import CredentialCryptoError, load_encrypted_credentials
+from src.crypto_store import (
+    CredentialCryptoError,
+    CredentialIntegrityError,
+    CredentialIOError,
+    load_encrypted_credentials,
+)
 
 
 def _create_eye_icon(crossed: bool = False) -> QIcon:
@@ -119,9 +127,15 @@ class _CredentialEntryBlock(QFrame):
 class CredentialDialog(QDialog):
     """Diálogo de credenciales con soporte para credentials.enc (AES-256-GCM) o ingreso manual."""
 
-    def __init__(self, config: AppConfig, parent: QWidget | None = None) -> None:
+    def __init__(
+        self,
+        config: AppConfig,
+        parent: QWidget | None = None,
+        log_callback: Callable[[str], None] | None = None,
+    ) -> None:
         super().__init__(parent)
         self.config = config
+        self._log_callback = log_callback
         self._servers = config.get_servers()
         self._blocks: dict[str, _CredentialEntryBlock] = {}
         self._enc_path: Path | None = config.resolve_credentials_enc_path()
@@ -285,6 +299,10 @@ class CredentialDialog(QDialog):
             block.setVisible(key in active)
         self.adjustSize()
 
+    def _emit_log(self, msg: str) -> None:
+        if self._log_callback is not None:
+            self._log_callback(msg)
+
     def _on_accept(self) -> None:
         create_lnk = self.shortcut_checkbox.isChecked()
 
@@ -295,6 +313,17 @@ class CredentialDialog(QDialog):
                     self,
                     "Archivo faltante",
                     "Seleccioná un archivo credentials.enc o usá el modo de ingreso manual.",
+                )
+                return
+
+            if not os.path.isfile(raw_path):
+                self._emit_log(
+                    f"[ERROR] Almacén credentials.enc inexistente o sin acceso: {raw_path}"
+                )
+                QMessageBox.warning(
+                    self,
+                    "Archivo no encontrado",
+                    f"No se encontró credentials.enc o no hay acceso a la ruta:\n{raw_path}",
                 )
                 return
 
@@ -309,7 +338,20 @@ class CredentialDialog(QDialog):
 
             try:
                 decrypted = load_encrypted_credentials(Path(raw_path), master_pwd)
+            except CredentialIntegrityError as exc:
+                self._emit_log(f"[ERROR] Fallo de descifrado AES-GCM ({raw_path}): {exc}")
+                QMessageBox.warning(
+                    self,
+                    "Contraseña incorrecta o archivo modificado",
+                    f"{exc}\n\nVerificá la Contraseña Maestra de IT.",
+                )
+                return
+            except CredentialIOError as exc:
+                self._emit_log(f"[ERROR] Error de E/S accediendo a {raw_path}: {exc}")
+                QMessageBox.warning(self, "Error de acceso al archivo", str(exc))
+                return
             except CredentialCryptoError as exc:
+                self._emit_log(f"[ERROR] Error general en almacén cifrado ({raw_path}): {exc}")
                 QMessageBox.warning(self, "Error de descifrado", str(exc))
                 return
 
@@ -423,3 +465,187 @@ class ProgressDialog(QDialog):
         else:
             self.progress_bar.setRange(0, 0)
             self.detail_label.setText(f"{current_mb:.2f} MB transferidos...")
+
+
+class PrinterInstallDialog(QDialog):
+    """Diálogo modal monocromático para instalar impresoras de red por IP."""
+
+    def __init__(self, config: AppConfig, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.config = config
+        self._printers_cfg = config.get_printers_config()
+        self._drivers: dict[str, dict[str, Any]] = dict(self._printers_cfg.get("drivers", {}))
+        self._catalog: list[dict[str, Any]] = list(self._printers_cfg.get("catalog", []))
+        self._catalog_checks: list[tuple[QCheckBox, dict[str, str]]] = []
+        self._selected_printers: list[dict[str, str]] = []
+
+        self.setWindowTitle("Instalar Impresoras de Oficina por IP")
+        self.setMinimumWidth(520)
+        self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
+        self.setModal(True)
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(16, 16, 16, 16)
+        root.setSpacing(10)
+
+        header_row = QHBoxLayout()
+        header_row.addWidget(QLabel("Seleccioná las impresoras a instalar:"))
+        header_row.addStretch()
+        select_all_btn = QPushButton("Seleccionar todas")
+        select_all_btn.clicked.connect(lambda _c=False: self._set_all_checked(True))
+        clear_all_btn = QPushButton("Limpiar selección")
+        clear_all_btn.clicked.connect(lambda _c=False: self._set_all_checked(False))
+        header_row.addWidget(select_all_btn)
+        header_row.addWidget(clear_all_btn)
+        root.addLayout(header_row)
+
+        catalog_card = QFrame()
+        catalog_card.setObjectName("CredentialCard")
+        catalog_card_layout = QVBoxLayout(catalog_card)
+        catalog_card_layout.setContentsMargins(10, 8, 10, 8)
+        catalog_card_layout.setSpacing(6)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setMaximumHeight(230)
+        scroll_inner = QWidget()
+        scroll_layout = QVBoxLayout(scroll_inner)
+        scroll_layout.setContentsMargins(2, 2, 2, 2)
+        scroll_layout.setSpacing(5)
+
+        for entry in self._catalog:
+            name = str(entry.get("name", "")).strip()
+            ip_str = str(entry.get("ip", "")).strip()
+            driver_key = str(entry.get("driver_key", "")).strip()
+            driver_info = self._drivers.get(driver_key, {})
+            driver_name = str(driver_info.get("driver_name", "")).strip()
+            inf_path = str(driver_info.get("inf_path", "")).strip()
+            driver_label = str(driver_info.get("label", driver_name or driver_key))
+
+            chk = QCheckBox(f"{name} ({ip_str}) — {driver_label}")
+            scroll_layout.addWidget(chk)
+            self._catalog_checks.append(
+                (
+                    chk,
+                    {
+                        "name": name,
+                        "ip": ip_str,
+                        "driver_name": driver_name,
+                        "inf_path": inf_path,
+                    },
+                )
+            )
+        scroll_layout.addStretch()
+        scroll.setWidget(scroll_inner)
+        catalog_card_layout.addWidget(scroll)
+        root.addWidget(catalog_card)
+
+        manual_card = QFrame()
+        manual_card.setObjectName("CredentialCard")
+        manual_layout = QVBoxLayout(manual_card)
+        manual_layout.setContentsMargins(12, 10, 12, 10)
+        manual_layout.setSpacing(8)
+
+        self.manual_enable_chk = QCheckBox("Agregar impresora manual por IP")
+        self.manual_enable_chk.toggled.connect(self._on_manual_toggled)
+        manual_layout.addWidget(self.manual_enable_chk)
+
+        manual_form = QFormLayout()
+        manual_form.setSpacing(8)
+
+        self.manual_name_edit = QLineEdit()
+        self.manual_name_edit.setPlaceholderText("Ej: HP Sala de Reuniones")
+        self.manual_ip_edit = QLineEdit()
+        self.manual_ip_edit.setPlaceholderText("Ej: 192.168.1.50")
+
+        self.manual_driver_combo = QComboBox()
+        for d_key, d_info in self._drivers.items():
+            d_label = str(d_info.get("label") or d_info.get("driver_name") or d_key)
+            self.manual_driver_combo.addItem(d_label, userData=d_key)
+
+        manual_form.addRow("Nombre:", self.manual_name_edit)
+        manual_form.addRow("Dirección IP:", self.manual_ip_edit)
+        manual_form.addRow("Driver:", self.manual_driver_combo)
+        manual_layout.addLayout(manual_form)
+        root.addWidget(manual_card)
+
+        self._on_manual_toggled(False)
+
+        buttons_row = QHBoxLayout()
+        buttons_row.addStretch()
+        self.cancel_btn = QPushButton("Cancelar")
+        self.cancel_btn.clicked.connect(self.reject)
+        self.accept_btn = QPushButton("Instalar Seleccionadas")
+        self.accept_btn.setObjectName("PrimaryButton")
+        self.accept_btn.clicked.connect(self._on_accept)
+        buttons_row.addWidget(self.cancel_btn)
+        buttons_row.addWidget(self.accept_btn)
+        root.addLayout(buttons_row)
+
+    def _set_all_checked(self, checked: bool) -> None:
+        for chk, _ in self._catalog_checks:
+            chk.setChecked(checked)
+
+    def _on_manual_toggled(self, enabled: bool) -> None:
+        self.manual_name_edit.setEnabled(enabled)
+        self.manual_ip_edit.setEnabled(enabled)
+        self.manual_driver_combo.setEnabled(enabled)
+
+    def _on_accept(self) -> None:
+        selected: list[dict[str, str]] = [
+            data for chk, data in self._catalog_checks if chk.isChecked()
+        ]
+
+        if self.manual_enable_chk.isChecked():
+            m_name = self.manual_name_edit.text().strip()
+            m_ip = self.manual_ip_edit.text().strip()
+            d_key = str(self.manual_driver_combo.currentData() or "")
+            d_info = self._drivers.get(d_key, {})
+
+            if not m_name:
+                QMessageBox.warning(
+                    self,
+                    "Nombre faltante",
+                    "Ingresá un nombre para la impresora manual.",
+                )
+                return
+            try:
+                ipaddress.ip_address(m_ip)
+            except ValueError:
+                QMessageBox.warning(
+                    self,
+                    "IP inválida",
+                    f"La dirección IP '{m_ip}' no es válida.",
+                )
+                return
+            if not d_info:
+                QMessageBox.warning(
+                    self,
+                    "Driver requerido",
+                    "Seleccioná un driver válido en config.json.",
+                )
+                return
+
+            selected.append(
+                {
+                    "name": m_name,
+                    "ip": m_ip,
+                    "driver_name": str(d_info.get("driver_name", "")).strip(),
+                    "inf_path": str(d_info.get("inf_path", "")).strip(),
+                }
+            )
+
+        if not selected:
+            QMessageBox.warning(
+                self,
+                "Sin selección",
+                "Seleccioná al menos una impresora de la lista o habilitá una IP manual.",
+            )
+            return
+
+        self._selected_printers = selected
+        self.accept()
+
+    def get_selected_printers(self) -> list[dict[str, str]]:
+        return list(self._selected_printers)

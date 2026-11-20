@@ -20,7 +20,15 @@ MAGIC_HEADER = b"EZCRED01"
 
 
 class CredentialCryptoError(Exception):
-    """Error al cifrar, descifrar o validar el almacén de credenciales."""
+    """Error base al cifrar, descifrar o validar el almacén de credenciales."""
+
+
+class CredentialIOError(CredentialCryptoError):
+    """Error de entrada/salida o ruta inexistente al acceder al almacén cifrado."""
+
+
+class CredentialIntegrityError(CredentialCryptoError):
+    """Error de autenticación GCM (contraseña incorrecta) o formato/datos inválidos."""
 
 
 def _derive_key(master_password: str, salt: bytes) -> bytes:
@@ -60,7 +68,7 @@ def decrypt_credentials(
     """Descifra y valida un payload binario generado por encrypt_credentials."""
     min_len = len(MAGIC_HEADER) + SALT_SIZE + NONCE_SIZE + 16
     if len(blob) < min_len or not blob.startswith(MAGIC_HEADER):
-        raise CredentialCryptoError("Formato inválido o archivo credentials.enc corrupto.")
+        raise CredentialIntegrityError("Formato inválido o archivo credentials.enc corrupto.")
 
     offset = len(MAGIC_HEADER)
     salt = blob[offset : offset + SALT_SIZE]
@@ -74,15 +82,15 @@ def decrypt_credentials(
     try:
         plaintext = aesgcm.decrypt(nonce, ciphertext, MAGIC_HEADER)
     except InvalidTag as exc:
-        raise CredentialCryptoError("Contraseña maestra incorrecta o archivo modificado.") from exc
+        raise CredentialIntegrityError("Contraseña maestra incorrecta o archivo modificado.") from exc
 
     try:
         parsed: Any = json.loads(plaintext.decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-        raise CredentialCryptoError("El contenido descifrado no es JSON válido.") from exc
+        raise CredentialIntegrityError("El contenido descifrado no es JSON válido.") from exc
 
     if not isinstance(parsed, dict):
-        raise CredentialCryptoError("Estructura de credenciales inválida.")
+        raise CredentialIntegrityError("Estructura de credenciales inválida.")
 
     normalized: dict[str, dict[str, str]] = {}
     for server_key, entry in parsed.items():
@@ -94,7 +102,7 @@ def decrypt_credentials(
             normalized[str(server_key)] = {"username": user, "password": pwd}
 
     if not normalized:
-        raise CredentialCryptoError("El archivo descifrado no contiene credenciales válidas.")
+        raise CredentialIntegrityError("El archivo descifrado no contiene credenciales válidas.")
 
     return normalized
 
@@ -114,14 +122,17 @@ def save_encrypted_credentials(
 
 
 def load_encrypted_credentials(
-    file_path: Path,
+    file_path: Path | str,
     master_password: str,
 ) -> dict[str, dict[str, str]]:
-    """Lee y descifra credentials.enc desde disco."""
-    if not file_path.is_file():
-        raise CredentialCryptoError(f"No se encontró el archivo cifrado: {file_path}")
+    """Lee y descifra credentials.enc desde disco validando existencia previa."""
+    resolved = Path(file_path)
+    if not os.path.isfile(resolved):
+        raise CredentialIOError(
+            f"No se encontró el archivo cifrado: {resolved}"
+        ) from FileNotFoundError(str(resolved))
     try:
-        blob = file_path.read_bytes()
+        blob = resolved.read_bytes()
     except OSError as exc:
-        raise CredentialCryptoError(f"No se pudo leer {file_path}: {exc}") from exc
+        raise CredentialIOError(f"Error de lectura/acceso en {resolved}: {exc}") from exc
     return decrypt_credentials(blob, master_password)

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import ipaddress
+import json
 import os
 from pathlib import Path
 import shutil
@@ -1290,6 +1292,233 @@ def copy_generic_item(
 
     log(f"[OK] {label} copiado correctamente.")
     return f"{label} copiado en {dest_path}."
+
+
+def run_generic_explorer(
+    path_str: str,
+    label: str,
+    select: bool = False,
+    log: LogCallback = _noop_log,
+    config: AppConfig | None = None,
+) -> str:
+    """Abre una carpeta o selecciona un archivo en el Explorador de Windows."""
+    if not path_str or not path_str.strip():
+        raise ValueError(
+            f"La ruta de '{label}' está vacía en config.json. "
+            "Completala antes de ejecutar esta tarea."
+        )
+    if config is not None:
+        validate_unc_host(path_str, config.get_allowed_unc_hosts())
+
+    target = Path(path_str)
+    if target.exists():
+        if select and target.is_file():
+            log(f"[INFO] Abriendo Explorador seleccionando {target}...")
+            _launch_detached("explorer.exe", [f"/select,{target}"])
+        else:
+            folder = target.parent if target.is_file() else target
+            log(f"[INFO] Abriendo carpeta en Explorador: {folder}")
+            _launch_detached("explorer.exe", [str(folder)])
+        return f"Explorador abierto para {label}."
+
+    if select and target.parent.is_dir():
+        log(
+            f"[ADVERTENCIA] No se encontró '{target.name}'; abriendo carpeta contenedora: {target.parent}"
+        )
+        _launch_detached("explorer.exe", [str(target.parent)])
+        return f"Carpeta contenedora abierta para {label}."
+
+    raise FileNotFoundError(
+        f"No se pudo acceder a '{label}' en la ruta configurada: {path_str}"
+    )
+
+
+def run_generic_open(
+    path_str: str,
+    label: str,
+    log: LogCallback = _noop_log,
+    config: AppConfig | None = None,
+) -> str:
+    """Abre un archivo configurado (p. ej. .txt) con su visor predeterminado vía os.startfile."""
+    target = _ensure_unc_exists(path_str, label, config=config)
+    log(f"[INFO] Abriendo archivo {label}: {target}")
+    os.startfile(str(target))
+    return f"Archivo {label} abierto."
+
+
+def run_generic_bat(
+    path_str: str,
+    label: str,
+    log: LogCallback = _noop_log,
+    config: AppConfig | None = None,
+) -> str:
+    """Ejecuta un script .bat en ruta UNC usando pushd/call/popd para evitar fallos de CWD en cmd.exe."""
+    bat_path = _ensure_unc_exists(path_str, label, config=config)
+    unc_dir = str(bat_path.parent)
+    bat_name = bat_path.name
+    cmd = [
+        "cmd.exe",
+        "/c",
+        "pushd",
+        unc_dir,
+        "&&",
+        "call",
+        bat_name,
+        "&",
+        "popd",
+    ]
+    log(f'[INFO] Ejecutando {label}: cmd.exe /c pushd "{unc_dir}" && call "{bat_name}" & popd')
+    subprocess.Popen(
+        cmd,
+        shell=False,
+        close_fds=True,
+        creationflags=getattr(subprocess, "CREATE_NEW_CONSOLE", 0x00000010),
+    )
+    return f"Script {label} iniciado en consola."
+
+
+_PRINTER_INSTALL_PS1 = """param(
+    [Parameter(Mandatory = $true)]
+    [string]$ManifestPath
+)
+$ErrorActionPreference = "Stop"
+Import-Module PrintManagement -ErrorAction Stop
+$items = Get-Content -Path $ManifestPath -Raw -Encoding UTF8 | ConvertFrom-Json
+
+foreach ($item in @($items)) {
+    $printerName = [string]$item.name
+    $printerIp   = [string]$item.ip
+    $driverName  = [string]$item.driver_name
+    $portName    = "IP_$printerIp"
+
+    Write-Output "[PS] Registrando driver '$driverName' en PrintManagement..."
+    Add-PrinterDriver -Name $driverName -ErrorAction Stop
+
+    $existingPort = Get-PrinterPort -Name $portName -ErrorAction SilentlyContinue
+    if ($null -eq $existingPort) {
+        Write-Output "[PS] Creando puerto TCP/IP '$portName' ($printerIp)..."
+        Add-PrinterPort -Name $portName -PrinterHostAddress $printerIp -ErrorAction Stop
+    } else {
+        Write-Output "[PS] Puerto '$portName' ya existe; se reutiliza."
+    }
+
+    $existingPrinter = Get-Printer -Name $printerName -ErrorAction SilentlyContinue
+    if ($null -ne $existingPrinter) {
+        Write-Output "[PS] Reemplazando cola de impresión existente '$printerName'..."
+        Remove-Printer -Name $printerName -ErrorAction Stop
+    }
+
+    Write-Output "[PS] Agregando impresora '$printerName' en puerto '$portName'..."
+    Add-Printer -Name $printerName -DriverName $driverName -PortName $portName -ErrorAction Stop
+    Write-Output "[OK] Impresora '$printerName' ($printerIp) configurada correctamente."
+}
+"""
+
+
+def install_network_printers(
+    config: AppConfig,
+    printers: list[dict[str, str]],
+    log: LogCallback = _noop_log,
+) -> str:
+    """Instala drivers con pnputil.exe y crea puertos TCP/IP y colas vía PrintManagement."""
+    if not printers:
+        raise ValueError("No se seleccionó ninguna impresora para instalar.")
+
+    normalized_printers: list[dict[str, str]] = []
+    seen_infs: list[Path] = []
+    seen_inf_keys: set[str] = set()
+
+    for raw in printers:
+        name = str(raw.get("name", "")).strip()
+        ip_str = str(raw.get("ip", "")).strip()
+        driver_name = str(raw.get("driver_name", "")).strip()
+        inf_raw = str(raw.get("inf_path", "")).strip()
+
+        if not name or not ip_str or not driver_name or not inf_raw:
+            raise ValueError(
+                f"Datos incompletos para impresora: name='{name}', ip='{ip_str}', driver='{driver_name}'."
+            )
+        try:
+            ipaddress.ip_address(ip_str)
+        except ValueError as exc:
+            raise ValueError(f"Dirección IP inválida para '{name}': '{ip_str}'.") from exc
+
+        inf_path = _ensure_unc_exists(inf_raw, f"Driver INF ({driver_name})", config=config)
+        normalized_printers.append(
+            {
+                "name": name,
+                "ip": ip_str,
+                "driver_name": driver_name,
+                "inf_path": str(inf_path),
+            }
+        )
+        inf_key = str(inf_path).lower()
+        if inf_key not in seen_inf_keys:
+            seen_inf_keys.add(inf_key)
+            seen_infs.append(inf_path)
+
+    for inf_path in seen_infs:
+        log(f"[INFO] Agregando driver mediante pnputil: {inf_path}")
+        pnp_result = subprocess.run(
+            ["pnputil.exe", "/add-driver", str(inf_path), "/install"],
+            capture_output=True,
+            text=True,
+            shell=False,
+            creationflags=_CREATE_NO_WINDOW,
+        )
+        for line in (pnp_result.stdout or "").splitlines():
+            if line.strip():
+                log(f"[pnputil] {line.strip()}")
+        for line in (pnp_result.stderr or "").splitlines():
+            if line.strip():
+                log(f"[pnputil ERR] {line.strip()}")
+        if pnp_result.returncode not in (0, 259, 3010):
+            raise RuntimeError(
+                f"pnputil.exe falló al instalar '{inf_path.name}' (código {pnp_result.returncode})."
+            )
+
+    with tempfile.TemporaryDirectory(prefix="ezsetup_printers_") as tmp_dir:
+        tmp_path = register_temp_dir(Path(tmp_dir))
+        try:
+            manifest_path = tmp_path / "printers_manifest.json"
+            ps1_path = tmp_path / "install_printers.ps1"
+            manifest_path.write_text(
+                json.dumps(normalized_printers, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+            ps1_path.write_text(_PRINTER_INSTALL_PS1, encoding="utf-8")
+
+            log("[INFO] Ejecutando configuración PrintManagement en PowerShell...")
+            ps_result = subprocess.run(
+                [
+                    "powershell",
+                    "-NoProfile",
+                    "-ExecutionPolicy",
+                    "Bypass",
+                    "-File",
+                    str(ps1_path),
+                    "-ManifestPath",
+                    str(manifest_path),
+                ],
+                capture_output=True,
+                text=True,
+                shell=False,
+                creationflags=_CREATE_NO_WINDOW,
+            )
+            for line in (ps_result.stdout or "").splitlines():
+                if line.strip():
+                    log(line.strip())
+            for line in (ps_result.stderr or "").splitlines():
+                if line.strip():
+                    log(f"[PS ERR] {line.strip()}")
+            if ps_result.returncode != 0:
+                raise RuntimeError(
+                    f"PrintManagement finalizó con código {ps_result.returncode}."
+                )
+        finally:
+            unregister_temp_dir(tmp_path)
+
+    return f"Se instalaron/actualizaron {len(normalized_printers)} impresora(s) correctamente."
 
 
 TASK_REGISTRY: dict[str, Callable[[AppConfig, LogCallback], str]] = {
