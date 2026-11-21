@@ -13,6 +13,7 @@ from PyQt6.QtWidgets import (
     QPlainTextEdit,
     QFormLayout,
     QProgressBar,
+    QFileDialog,
 )
 from PyQt6.QtCore import Qt
 
@@ -33,6 +34,12 @@ from core.system_repair import (
     sfc_scannow,
     run_full_repair,
 )
+from core.diagnostics import (
+    get_smart_health,
+    get_battery_health,
+    get_system_stability,
+    export_diagnostic_report,
+)
 
 
 class MainWindow(QMainWindow):
@@ -44,6 +51,7 @@ class MainWindow(QMainWindow):
         self.setMinimumSize(WINDOW_MIN_WIDTH, WINDOW_MIN_HEIGHT)
         self._active_worker: TaskWorker | None = None
         self._action_buttons: list[QPushButton] = []
+        self._diag_results: dict[str, str] = {}
         self._setup_ui()
         self._refresh_hibernation_status()
         self._refresh_max_icons_status()
@@ -57,6 +65,7 @@ class MainWindow(QMainWindow):
 
         self.tabs = QTabWidget()
         self.tabs.addTab(self._build_repair_tab(), "Reparación de Sistema")
+        self.tabs.addTab(self._build_diagnostics_tab(), "Diagnóstico y Hardware")
         self.tabs.addTab(self._build_tweaks_tab(), "Energía y Cuentas")
         self.tabs.addTab(self._build_shell_tab(), "Shell, Iconos y Red")
         main_layout.addWidget(self.tabs, stretch=2)
@@ -126,6 +135,45 @@ class MainWindow(QMainWindow):
             self.btn_full_repair,
         ])
 
+        layout.addStretch()
+        return tab
+
+    def _build_diagnostics_tab(self) -> QWidget:
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+        layout.setSpacing(12)
+
+        smart_group = QGroupBox("Discos Físicos (S.M.A.R.T.)")
+        smart_layout = QVBoxLayout(smart_group)
+        self.smart_label = QLabel("Sin datos. Ejecutá el diagnóstico para consultar.")
+        self.smart_label.setWordWrap(True)
+        smart_layout.addWidget(self.smart_label)
+        layout.addWidget(smart_group)
+
+        battery_group = QGroupBox("Salud de Batería")
+        battery_layout = QVBoxLayout(battery_group)
+        self.battery_label = QLabel("Sin datos. Ejecutá el diagnóstico para consultar.")
+        self.battery_label.setWordWrap(True)
+        battery_layout.addWidget(self.battery_label)
+        layout.addWidget(battery_group)
+
+        stability_group = QGroupBox("Estabilidad, RAM y Eventos Críticos (BSOD)")
+        stability_layout = QVBoxLayout(stability_group)
+        self.stability_label = QLabel("Sin datos. Ejecutá el diagnóstico para consultar.")
+        self.stability_label.setWordWrap(True)
+        stability_layout.addWidget(self.stability_label)
+        layout.addWidget(stability_group)
+
+        btn_row = QHBoxLayout()
+        self.btn_run_diag = QPushButton("Ejecutar Diagnóstico Completo")
+        self.btn_export_diag = QPushButton("Exportar Reporte (.txt)")
+        self.btn_run_diag.clicked.connect(self._handle_run_diagnostics)
+        self.btn_export_diag.clicked.connect(self._handle_export_diagnostics)
+        btn_row.addWidget(self.btn_run_diag)
+        btn_row.addWidget(self.btn_export_diag)
+        layout.addLayout(btn_row)
+
+        self._action_buttons.extend([self.btn_run_diag, self.btn_export_diag])
         layout.addStretch()
         return tab
 
@@ -275,6 +323,51 @@ class MainWindow(QMainWindow):
         password = self.input_password.text()
         fullname = self.input_fullname.text()
         self._run_task(create_local_user, "Creando usuario local...", username, password, fullname)
+
+    def _run_diagnostics_bundle(self) -> tuple[bool, str]:
+        _, smart_msg = get_smart_health()
+        _, battery_msg = get_battery_health()
+        _, stability_msg = get_system_stability()
+        self._diag_results = {
+            "smart": smart_msg,
+            "battery": battery_msg,
+            "stability": stability_msg,
+        }
+        return True, "Diagnóstico completo finalizado."
+
+    def _handle_run_diagnostics(self) -> None:
+        if self._active_worker is not None and self._active_worker.isRunning():
+            return
+        self.log_output.appendPlainText("[INFO] Ejecutando diagnóstico completo de hardware y sistema...")
+        self._set_controls_enabled(False)
+        self._active_worker = TaskWorker(self._run_diagnostics_bundle)
+        self._active_worker.finished_signal.connect(self._on_diagnostics_finished)
+        self._active_worker.start()
+
+    def _on_diagnostics_finished(self, ok: bool, message: str) -> None:
+        if self._diag_results:
+            self.smart_label.setText(self._diag_results.get("smart", "N/D"))
+            self.battery_label.setText(self._diag_results.get("battery", "N/D"))
+            self.stability_label.setText(self._diag_results.get("stability", "N/D"))
+        self._append_log(ok, message)
+        self._set_controls_enabled(True)
+
+    def _handle_export_diagnostics(self) -> None:
+        if not self._diag_results:
+            self._append_log(False, "Ejecutá primero el Diagnóstico Completo antes de exportar.")
+            return
+        import os
+        default_name = f"{os.environ.get('COMPUTERNAME', 'EQUIPO')}-Reporte.txt"
+        path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Exportar Reporte de Diagnóstico",
+            default_name,
+            "Archivos de texto (*.txt)",
+        )
+        if not path:
+            return
+        ok, msg = export_diagnostic_report(path, self._diag_results)
+        self._append_log(ok, msg)
 
     def _run_task(self, fn, status_msg: str = "", *args) -> None:
         if self._active_worker is not None and self._active_worker.isRunning():
