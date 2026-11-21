@@ -11,8 +11,12 @@ Se han importado 6 archivos heredados en la carpeta `legacy/` que conforman la b
 6. **`legacy/Start.bat`**: Script CMD auto-elevable (`net session` + `runas`) con log en `%TEMP%\reparacion_windows.log` que ejecuta `DISM /RestoreHealth`, `sfc /scannow`, inicia `MpsSvc` si está detenido para re-registrar paquetes AppX y finaliza con `DISM /StartComponentCleanup`.
 
 ## Hoja de Ruta (Migración a App Standalone)
-- [ ] **Fase 1 - Estructura base**: Inicializar entorno virtual Python 3.12 (`.venv`), `pyproject.toml`/`requirements.txt` (PyQt6) y estructura modular (`core/`, `ui/`, `utils/`).
-- [ ] **Fase 2 - Motor de ejecución**: Implementar runner de comandos con `CREATE_NO_WINDOW`, captura de salida en tiempo real, verificación UAC nativa y manejo de errores.
-- [ ] **Fase 3 - Módulos funcionales**: Migrar la lógica de los 6 scripts a módulos Python desacoplados (Integridad de Sistema, Telemetría y Hardware, Shell e Iconos, Energía y Usuarios).
-- [ ] **Fase 4 - Interfaz PyQt6**: Diseñar UI oscura monocromática por pestañas con barra de progreso, visor de logs y exportación de reportes.
+- [x] **Fase 1 - Estructura base**: Inicializar entorno virtual Python 3.12 (`.venv`), `requirements.txt` (PyQt6), `.gitignore` y estructura modular (`src/core/`, `src/ui/`, `assets/`).
+- [x] **Fase 2 - Motor de ejecución**: Implementar `src/workers.py` y ejecución silenciosa (`CREATE_NO_WINDOW`), captura de salida, verificación UAC nativa (`src/main.py`) y manejo de errores.
+- [/] **Fase 3 - Módulos funcionales**:
+  - [x] `src/core/system_tweaks.py` (Hibernación / Inicio Rápido y creación de usuarios locales).
+  - [ ] `src/core/system_repair.py` (`DISM` y `SFC`).
+  - [ ] `src/core/diagnostics.py` (S.M.A.R.T., batería, RAM/Uptime, BSOD y exportación de reporte).
+  - [ ] `src/core/shell_repair.py` (Caché de iconos, AppX, `ipconfig /flushdns`).
+- [/] **Fase 4 - Interfaz PyQt6**: Diseñar UI oscura monocromática por pestañas (`src/ui/main_window.py`) con visor de logs (completada pestaña **Energía y Cuentas**).
 - [ ] **Fase 5 - Empaquetado y portabilidad**: Configurar compilación standalone (PyInstaller con manifiesto UAC) y evaluar portado puntual de utilidades hacia `EzSetup` manteniendo ambos proyectos desacoplados.
