@@ -1,9 +1,18 @@
 """Configuración global, constantes y estilos de la aplicación Utilidades."""
 
+import sys
+from pathlib import Path
+
 APP_NAME = "Utilidades de Soporte Técnico"
-APP_VERSION = "0.1.0"
-WINDOW_MIN_WIDTH = 860
-WINDOW_MIN_HEIGHT = 600
+APP_VERSION = "1.0.0"
+WINDOW_MIN_WIDTH = 1040
+WINDOW_MIN_HEIGHT = 620
+
+
+def resolve_resource_path(relative_path: str) -> Path:
+    """Resuelve rutas de recursos tanto en desarrollo como en binario congelado PyInstaller."""
+    base = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent.parent))
+    return base / relative_path
 
 # Hoja de estilos oscura monocromática consistente con el repositorio
 DARK_MONOCHROME_QSS = """

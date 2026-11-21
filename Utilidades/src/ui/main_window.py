@@ -16,8 +16,9 @@ from PyQt6.QtWidgets import (
     QFileDialog,
 )
 from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QIcon
 
-from config import APP_NAME, APP_VERSION, WINDOW_MIN_WIDTH, WINDOW_MIN_HEIGHT
+from config import APP_NAME, APP_VERSION, WINDOW_MIN_WIDTH, WINDOW_MIN_HEIGHT, resolve_resource_path
 from workers import TaskWorker, StreamingTaskWorker
 from core.system_tweaks import get_hibernation_status, set_hibernation, create_local_user
 from core.shell_repair import (
@@ -49,6 +50,10 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle(f"{APP_NAME} v{APP_VERSION}")
         self.setMinimumSize(WINDOW_MIN_WIDTH, WINDOW_MIN_HEIGHT)
+        self.resize(1080, 680)
+        icon_path = resolve_resource_path("assets/icon.ico")
+        if icon_path.exists():
+            self.setWindowIcon(QIcon(str(icon_path)))
         self._active_worker: TaskWorker | None = None
         self._action_buttons: list[QPushButton] = []
         self._diag_results: dict[str, str] = {}

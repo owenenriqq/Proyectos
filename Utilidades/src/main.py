@@ -3,6 +3,7 @@
 import ctypes
 import sys
 from pathlib import Path
+from PyQt6.QtGui import QIcon
 from PyQt6.QtWidgets import QApplication
 
 # Asegura que el directorio src esté en sys.path al ejecutar como script
@@ -10,7 +11,7 @@ SRC_DIR = Path(__file__).resolve().parent
 if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
-from config import DARK_MONOCHROME_QSS
+from config import DARK_MONOCHROME_QSS, resolve_resource_path
 from ui.main_window import MainWindow
 
 
@@ -36,6 +37,9 @@ def main() -> int:
         return 0
 
     app = QApplication(sys.argv)
+    icon_path = resolve_resource_path("assets/icon.ico")
+    if icon_path.exists():
+        app.setWindowIcon(QIcon(str(icon_path)))
     app.setStyleSheet(DARK_MONOCHROME_QSS)
     window = MainWindow()
     window.show()

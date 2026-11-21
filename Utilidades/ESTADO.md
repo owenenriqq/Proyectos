@@ -19,4 +19,4 @@ Se han importado 6 archivos heredados en la carpeta `legacy/` que conforman la b
   - [x] `src/core/diagnostics.py` (S.M.A.R.T., batería, RAM/Uptime, BSOD y exportación de reporte).
   - [x] `src/core/shell_repair.py` (Caché de iconos, `Max Cached Icons`, AppX con `MpsSvc`, `ipconfig /flushdns`).
 - [x] **Fase 4 - Interfaz PyQt6**: Diseñar UI oscura monocromática por pestañas (`src/ui/main_window.py`) con visor de logs (completadas pestañas **Reparación de Sistema**, **Diagnóstico y Hardware**, **Energía y Cuentas** y **Shell, Iconos y Red**).
-- [ ] **Fase 5 - Empaquetado y portabilidad**: Configurar compilación standalone (PyInstaller con manifiesto UAC) y evaluar portado puntual de utilidades hacia `EzSetup` manteniendo ambos proyectos desacoplados.
+- [x] **Fase 5 - Empaquetado y portabilidad**: Ícono monocromático (`assets/icon.svg` / `assets/icon.ico`), resolución de recursos (`sys._MEIPASS`), dimensiones `1080x680` y compilación standalone `dist\Utilidades.exe` vía PyInstaller con manifiesto UAC (`--uac-admin`).
