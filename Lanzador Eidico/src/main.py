@@ -706,7 +706,7 @@ class GestorEidico(QWidget):
             try:
                 os.startfile(resultado)
                 self.emitir_notificacion(
-                    "Gestor Eidico", f"Instalador {nombre} abierto correctamente."
+                    "Eidico", f"Instalador {nombre} abierto correctamente."
                 )
             except OSError:
                 logger.exception("Fallo al abrir el instalador %s en %s", nombre, resultado)

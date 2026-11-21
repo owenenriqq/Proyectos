@@ -72,7 +72,7 @@ Gestor-Redes/
   - `main.py`:
     - Eliminadas las referencias residuales a `'Sin UAC'` (`"Modo Estándar"` / `"Elevar Admin"`).
   - Verificación aprobada con mocks de `subprocess.run` en `cp850` y `utf-8` (`AST_OK`, `RESET_SPANISH_CP850_OK`, `DEEP_CLEANUP_SPANISH_CP850_OK`, `RESET_SPANISH_UTF-8_OK`, `DEEP_CLEANUP_SPANISH_UTF-8_OK`, `NON_ADMIN_OK`) y eliminación de scripts temporales de test.
-  - Nota de compilación: `dist\GestorRedes.exe` no pudo sobreescribirse aún porque una instancia elevada de `GestorRedes.exe` permanece abierta (`Acceso denegado`).
+  - Compilación completada: `dist\GestorRedes.exe` compilado con éxito mediante `build.ps1` (PyInstaller).
 
 - **2026-11-19 — v1.0.4 (Pulido visual de tarjetas, purga SMB/Kerberos y recompilación)**:
   - `main.py` y `styles.py`:

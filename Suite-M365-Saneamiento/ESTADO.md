@@ -22,9 +22,9 @@ Suite modular portátil en PowerShell 5.1 sin dependencias externas:
 
 ## Pendiente de Depurar / Verificar
 
-- Probar `Get-OfficeDiagnostics.ps1` en un equipo con Microsoft 365 / Office y Project/Visio instalados para validar el parseo bloque por bloque de `ospp.vbs /dstatus` y la detección de `sppc.dll`.
-- Validar `Clear-IdentityCache.ps1`, `Reset-OfficeLicenses.ps1` y `Uninstall-OfficeProducts.ps1` (Opción 8) en modo `-WhatIf` y posteriormente en ejecución controlada (Selectivo y Total).
+- Validado en equipo real: limpieza de caché WAM/OneAuth (`Clear-IdentityCache.ps1`), reseteo de licencias (`Reset-OfficeLicenses.ps1`) y coexistencia de Microsoft 365 con Project 2021.
+- Pendiente validar `Uninstall-OfficeProducts.ps1` (Opción 8) en ejecución controlada (Selectivo y Total) en equipo destino.
 
 ## Siguiente Paso
 
-- Ejecutar una prueba de diagnóstico (`Get-OfficeDiagnostics.ps1`) y una prueba `-WhatIf` de la Opción 8 en un equipo destino con Office instalado y revisar el log generado.
+- Ejecutar una prueba `-WhatIf` y ejecución controlada de la Opción 8 (`Uninstall-OfficeProducts.ps1`) cuando se requiera desinstalación de productos Office/Project/Visio.

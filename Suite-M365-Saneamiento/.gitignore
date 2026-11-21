@@ -1,4 +1,2 @@
-*.log
+# Transcripciones propias de la suite
 *.transcript
-*.bak
-*.tmp

@@ -1,16 +1,5 @@
-# Entorno virtual y caché de Python
-.venv/
-__pycache__/
-*.py[cod]
-
-# Artefactos de compilación de PyInstaller
-build/
-dist/
-
-# Archivos de registro
-*.log
-
 # Archivos corporativos que NO deben ignorarse
 !Eidico.ico
 !InstructivoAWSVPN.pdf
 !comando.txt
+!Eidico.spec
