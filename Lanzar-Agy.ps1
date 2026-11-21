@@ -27,10 +27,12 @@ if ($raizProyectos) {
 
     # Carpetas habituales (solo agrega las que existan en la PC actual)
     $candidatas = @(
+        "EidicoVBS",
         "EzSetup\EzSetup_Python",
         "Gestor-Redes",
-        "Lanzar Eidico",
-        "M365-Sanitizer"
+        "Inventario Eidico",
+        "Lanzador Eidico",
+        "Suite-M365-Saneamiento"
     )
 
     foreach ($rel in $candidatas) {

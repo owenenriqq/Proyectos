@@ -22,7 +22,7 @@ Suite modular portátil en PowerShell 5.1 sin dependencias externas:
 
 ## Pendiente de Depurar / Verificar
 
-- Validado en equipo real: limpieza de caché WAM/OneAuth (`Clear-IdentityCache.ps1`), reseteo de licencias (`Reset-OfficeLicenses.ps1`) y coexistencia de Microsoft 365 con Project 2021.
+- Validado en equipo real: ejecución directa de la suite desde el servidor corporativo con éxito, incluyendo la generación y guardado correcto de logs en `logs\`, limpieza de caché WAM/OneAuth (`Clear-IdentityCache.ps1`), reseteo de licencias (`Reset-OfficeLicenses.ps1`) y coexistencia de Microsoft 365 con Project 2021.
 - Pendiente validar `Uninstall-OfficeProducts.ps1` (Opción 8) en ejecución controlada (Selectivo y Total) en equipo destino.
 
 ## Siguiente Paso

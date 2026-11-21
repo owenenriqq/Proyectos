@@ -22,8 +22,11 @@
 - Validación visual en vivo del nuevo `panel_sin_vpn` y de la detección de `AWS VPN Client.exe`.
 - Compilación final del nuevo `Eidico.exe` con PyInstaller usando `comando.txt` (pendiente de autorización explícita).
 - En `main.py` (`fin_descarga_simple`, línea 709) persiste `"Gestor Eidico"` en una llamada a `emitir_notificacion` (reportado en auditoría).
+- Revisar/probar `src/Produccion.zip` para definir si se conserva o se descarta.
 
 ## Última actualización
+
+- Se eliminaron `Ejecutable dañado/` y `src/Correcciones.txt` del repositorio.
 
 - Se corrigió el nombre real del ejecutable (`AWS VPN Client.exe` prioritario con fallback `AWSVPNClient.exe`) en `config.py` y `workers.py`.
 - Se implementó visibilidad exclusiva de **Instalar VPN** vs. **Abrir AWS VPN Client** y se rediseñaron los textos y dimensiones de `panel_sin_vpn` en `main.py`.

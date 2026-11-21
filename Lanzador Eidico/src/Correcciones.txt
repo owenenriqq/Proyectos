@@ -1,7 +1,0 @@
-ajustar el desplegable de "opciones"
-
-añadir control total en sol sistemas
-
-Corregir mensajes de Windows
-
-Se cierra al descargar forticlient
