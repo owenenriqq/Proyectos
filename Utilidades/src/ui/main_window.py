@@ -1,7 +1,13 @@
 """Ventana principal de la aplicación Utilidades."""
 
+import os
+from pathlib import Path
+
 from PyQt6.QtWidgets import (
+    QApplication,
+    QCheckBox,
     QMainWindow,
+    QMessageBox,
     QWidget,
     QVBoxLayout,
     QHBoxLayout,
@@ -16,7 +22,7 @@ from PyQt6.QtWidgets import (
     QFileDialog,
 )
 from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QIcon
+from PyQt6.QtGui import QCloseEvent, QIcon
 
 from config import APP_NAME, APP_VERSION, WINDOW_MIN_WIDTH, WINDOW_MIN_HEIGHT, resolve_resource_path
 from workers import TaskWorker, StreamingTaskWorker
@@ -83,6 +89,22 @@ class MainWindow(QMainWindow):
 
         log_group = QGroupBox("Registro de Actividad")
         log_layout = QVBoxLayout(log_group)
+
+        log_header = QHBoxLayout()
+        log_header.addStretch()
+        self.btn_log_copy = QPushButton("Copiar")
+        self.btn_log_clear = QPushButton("Limpiar")
+        self.btn_log_save = QPushButton("Guardar .log")
+        for btn in (self.btn_log_copy, self.btn_log_clear, self.btn_log_save):
+            btn.setFixedHeight(26)
+        self.btn_log_copy.clicked.connect(self._handle_copy_log)
+        self.btn_log_clear.clicked.connect(self._handle_clear_log)
+        self.btn_log_save.clicked.connect(self._handle_save_log)
+        log_header.addWidget(self.btn_log_copy)
+        log_header.addWidget(self.btn_log_clear)
+        log_header.addWidget(self.btn_log_save)
+        log_layout.addLayout(log_header)
+
         self.log_output = QPlainTextEdit()
         self.log_output.setReadOnly(True)
         log_layout.addWidget(self.log_output)
@@ -128,7 +150,7 @@ class MainWindow(QMainWindow):
         full_desc = QLabel("Ejecuta en orden: ScanHealth -> RestoreHealth (si aplica) -> SFC /scannow -> StartComponentCleanup.")
         full_layout.addWidget(full_desc)
         self.btn_full_repair = QPushButton("Reparación Completa Automática")
-        self.btn_full_repair.clicked.connect(lambda: self._run_streaming_task(run_full_repair, "Iniciando reparación completa automática..."))
+        self.btn_full_repair.clicked.connect(self._handle_full_repair)
         full_layout.addWidget(self.btn_full_repair)
         layout.addWidget(full_group)
 
@@ -156,10 +178,14 @@ class MainWindow(QMainWindow):
         layout.addWidget(smart_group)
 
         battery_group = QGroupBox("Salud de Batería")
-        battery_layout = QVBoxLayout(battery_group)
+        battery_layout = QHBoxLayout(battery_group)
         self.battery_label = QLabel("Sin datos. Ejecutá el diagnóstico para consultar.")
         self.battery_label.setWordWrap(True)
-        battery_layout.addWidget(self.battery_label)
+        self.btn_open_battery_html = QPushButton("Abrir reporte HTML")
+        self.btn_open_battery_html.setEnabled(self._get_battery_report_path().exists())
+        self.btn_open_battery_html.clicked.connect(self._handle_open_battery_html)
+        battery_layout.addWidget(self.battery_label, stretch=1)
+        battery_layout.addWidget(self.btn_open_battery_html)
         layout.addWidget(battery_group)
 
         stability_group = QGroupBox("Estabilidad, RAM y Eventos Críticos (BSOD)")
@@ -172,13 +198,14 @@ class MainWindow(QMainWindow):
         btn_row = QHBoxLayout()
         self.btn_run_diag = QPushButton("Ejecutar Diagnóstico Completo")
         self.btn_export_diag = QPushButton("Exportar Reporte (.txt)")
+        self.btn_export_diag.setEnabled(False)
         self.btn_run_diag.clicked.connect(self._handle_run_diagnostics)
         self.btn_export_diag.clicked.connect(self._handle_export_diagnostics)
         btn_row.addWidget(self.btn_run_diag)
         btn_row.addWidget(self.btn_export_diag)
         layout.addLayout(btn_row)
 
-        self._action_buttons.extend([self.btn_run_diag, self.btn_export_diag])
+        self._action_buttons.append(self.btn_run_diag)
         layout.addStretch()
         return tab
 
@@ -218,16 +245,28 @@ class MainWindow(QMainWindow):
         form = QFormLayout()
         self.input_username = QLineEdit()
         self.input_username.setPlaceholderText("Ej: Soporte")
+
+        pass_row = QHBoxLayout()
         self.input_password = QLineEdit()
         self.input_password.setEchoMode(QLineEdit.EchoMode.Password)
         self.input_password.setPlaceholderText("Contraseña segura")
+        self.btn_toggle_pass = QPushButton("Ver")
+        self.btn_toggle_pass.setCheckable(True)
+        self.btn_toggle_pass.setFixedWidth(72)
+        self.btn_toggle_pass.toggled.connect(self._toggle_password_visibility)
+        pass_row.addWidget(self.input_password, stretch=1)
+        pass_row.addWidget(self.btn_toggle_pass)
+
         self.input_fullname = QLineEdit()
         self.input_fullname.setPlaceholderText("Opcional")
 
         form.addRow("Nombre de usuario:", self.input_username)
-        form.addRow("Contraseña:", self.input_password)
+        form.addRow("Contraseña:", pass_row)
         form.addRow("Nombre completo:", self.input_fullname)
         user_layout.addLayout(form)
+
+        self.chk_admin_group = QCheckBox("Agregar al grupo Administradores")
+        user_layout.addWidget(self.chk_admin_group)
 
         user_btn_row = QHBoxLayout()
         self.btn_create_user = QPushButton("Crear Usuario Local")
@@ -251,7 +290,7 @@ class MainWindow(QMainWindow):
         icon_desc = QLabel("Detiene explorer.exe, elimina IconCache.db / iconcache* y reinicia el Shell.")
         icon_desc.setObjectName("StatusLabel")
         self.btn_rebuild_icons = QPushButton("Reconstruir Caché de Iconos")
-        self.btn_rebuild_icons.clicked.connect(lambda: self._run_task(rebuild_icon_cache, "Reconstruyendo caché de iconos..."))
+        self.btn_rebuild_icons.clicked.connect(self._handle_rebuild_icons)
         icon_layout.addWidget(icon_desc, stretch=1)
         icon_layout.addWidget(self.btn_rebuild_icons)
         layout.addWidget(icon_group)
@@ -277,7 +316,7 @@ class MainWindow(QMainWindow):
         appx_desc = QLabel("Verifica/inicia el servicio MpsSvc y re-registra los paquetes AppX.")
         appx_desc.setObjectName("StatusLabel")
         self.btn_reregister_appx = QPushButton("Re-registrar Paquetes AppX")
-        self.btn_reregister_appx.clicked.connect(lambda: self._run_task(reregister_appx_packages, "Re-registrando paquetes AppX (puede demorar)..."))
+        self.btn_reregister_appx.clicked.connect(self._handle_reregister_appx)
         appx_layout.addWidget(appx_desc, stretch=1)
         appx_layout.addWidget(self.btn_reregister_appx)
         layout.addWidget(appx_group)
@@ -314,6 +353,94 @@ class MainWindow(QMainWindow):
     def _set_controls_enabled(self, enabled: bool) -> None:
         for btn in self._action_buttons:
             btn.setEnabled(enabled)
+        self.btn_export_diag.setEnabled(enabled and bool(self._diag_results))
+        self.btn_open_battery_html.setEnabled(enabled and self._get_battery_report_path().exists())
+
+    def _get_battery_report_path(self) -> Path:
+        return Path(os.environ.get("TEMP", "")) / "battery.html"
+
+    def _confirm_action(self, title: str, text: str) -> bool:
+        reply = QMessageBox.question(
+            self,
+            title,
+            text,
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        return reply == QMessageBox.StandardButton.Yes
+
+    def _handle_copy_log(self) -> None:
+        text = self.log_output.toPlainText()
+        if text:
+            QApplication.clipboard().setText(text)
+            self._append_log(True, "Registro copiado al portapapeles.")
+
+    def _handle_clear_log(self) -> None:
+        self.log_output.clear()
+
+    def _handle_save_log(self) -> None:
+        text = self.log_output.toPlainText()
+        if not text.strip():
+            self._append_log(False, "No hay contenido en el registro para guardar.")
+            return
+        default_name = f"{os.environ.get('COMPUTERNAME', 'EQUIPO')}-Actividad.log"
+        path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Guardar Registro de Actividad",
+            default_name,
+            "Archivos de registro (*.log);;Archivos de texto (*.txt)",
+        )
+        if not path:
+            return
+        try:
+            Path(path).write_text(text, encoding="utf-8")
+            self._append_log(True, f"Registro guardado en: {path}")
+        except OSError as exc:
+            self._append_log(False, f"No se pudo guardar el registro: {exc}")
+
+    def _handle_full_repair(self) -> None:
+        if self._confirm_action(
+            "Confirmar Reparación Completa",
+            "Se ejecutará la secuencia completa (DISM ScanHealth, RestoreHealth, SFC /scannow y StartComponentCleanup).\n\n"
+            "Este proceso puede demorar varios minutos. ¿Deseás continuar?",
+        ):
+            self._run_streaming_task(run_full_repair, "Iniciando reparación completa automática...")
+
+    def _handle_rebuild_icons(self) -> None:
+        if self._confirm_action(
+            "Confirmar Reconstrucción de Caché de Iconos",
+            "Esta acción detendrá temporalmente explorer.exe y cerrará todas las ventanas abiertas del Explorador de Windows.\n\n"
+            "¿Deseás continuar?",
+        ):
+            self._run_task(rebuild_icon_cache, "Reconstruyendo caché de iconos...")
+
+    def _handle_reregister_appx(self) -> None:
+        if self._confirm_action(
+            "Confirmar Re-registro de Paquetes AppX",
+            "Se verificará el servicio MpsSvc y se re-registrarán todas las aplicaciones integradas (AppX) para todos los usuarios.\n\n"
+            "Este proceso puede demorar varios minutos. ¿Deseás continuar?",
+        ):
+            self._run_task(reregister_appx_packages, "Re-registrando paquetes AppX (puede demorar)...")
+
+    def _handle_open_battery_html(self) -> None:
+        report_path = self._get_battery_report_path()
+        if not report_path.exists():
+            self._append_log(False, f"No se encontró el reporte de batería en: {report_path}")
+            self.btn_open_battery_html.setEnabled(False)
+            return
+        try:
+            os.startfile(str(report_path))
+            self._append_log(True, f"Abriendo reporte de batería: {report_path}")
+        except OSError as exc:
+            self._append_log(False, f"No se pudo abrir el reporte HTML: {exc}")
+
+    def _toggle_password_visibility(self, checked: bool) -> None:
+        if checked:
+            self.input_password.setEchoMode(QLineEdit.EchoMode.Normal)
+            self.btn_toggle_pass.setText("Ocultar")
+        else:
+            self.input_password.setEchoMode(QLineEdit.EchoMode.Password)
+            self.btn_toggle_pass.setText("Ver")
 
     def _refresh_hibernation_status(self) -> None:
         _, msg = get_hibernation_status()
@@ -327,7 +454,16 @@ class MainWindow(QMainWindow):
         username = self.input_username.text()
         password = self.input_password.text()
         fullname = self.input_fullname.text()
-        self._run_task(create_local_user, "Creando usuario local...", username, password, fullname)
+        add_to_admins = self.chk_admin_group.isChecked()
+        self._run_task(
+            create_local_user,
+            "Creando usuario local...",
+            username,
+            password,
+            fullname,
+            "Cuenta local creada con Utilidades",
+            add_to_admins,
+        )
 
     def _run_diagnostics_bundle(self) -> tuple[bool, str]:
         _, smart_msg = get_smart_health()
@@ -414,3 +550,15 @@ class MainWindow(QMainWindow):
         if ok:
             self.input_password.clear()
         self._set_controls_enabled(True)
+
+    def closeEvent(self, event: QCloseEvent) -> None:
+        if self._active_worker is not None and self._active_worker.isRunning():
+            confirm = self._confirm_action(
+                "Tarea en ejecución",
+                "Hay una operación de sistema en curso. Cerrar la aplicación ahora podría interrumpirla.\n\n"
+                "¿Deseás cerrar de todos modos?",
+            )
+            if not confirm:
+                event.ignore()
+                return
+        event.accept()

@@ -46,6 +46,7 @@ def create_local_user(
     password: str,
     full_name: str = "",
     description: str = "Cuenta local creada con Utilidades",
+    add_to_admins: bool = False,
 ) -> tuple[bool, str]:
     """Crea una cuenta de usuario local en Windows mediante PowerShell sin consola visible."""
     clean_user = username.strip()
@@ -61,15 +62,22 @@ def create_local_user(
     safe_user = clean_user.replace("'", "''")
     safe_pass = password.replace("'", "''")
 
-    ps_script = (
-        "$ErrorActionPreference = 'Stop'; "
-        f"$sec = ConvertTo-SecureString '{safe_pass}' -AsPlainText -Force; "
-        f"New-LocalUser -Name '{safe_user}' -Password $sec -FullName '{safe_full}' -Description '{safe_desc}' | Out-Null"
-    )
+    ps_parts = [
+        "$ErrorActionPreference = 'Stop'",
+        f"$sec = ConvertTo-SecureString '{safe_pass}' -AsPlainText -Force",
+        f"New-LocalUser -Name '{safe_user}' -Password $sec -FullName '{safe_full}' -Description '{safe_desc}' | Out-Null",
+    ]
+    if add_to_admins:
+        ps_parts.append("$adminGroup = (Get-LocalGroup -SID 'S-1-5-32-544').Name")
+        ps_parts.append(f"Add-LocalGroupMember -Group $adminGroup -Member '{safe_user}'")
+
+    ps_script = "; ".join(ps_parts)
 
     res = _run_silent(["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", ps_script])
     if res.returncode != 0:
         err = res.stderr.strip() or res.stdout.strip() or f"Código de salida {res.returncode}"
         return False, f"Error al crear el usuario '{clean_user}': {err}"
 
+    if add_to_admins:
+        return True, f"Usuario local '{clean_user}' creado y agregado al grupo Administradores (SID S-1-5-32-544)."
     return True, f"Usuario local '{clean_user}' creado correctamente."
