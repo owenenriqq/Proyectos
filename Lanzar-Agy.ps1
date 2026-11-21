@@ -32,7 +32,8 @@ if ($raizProyectos) {
         "Gestor-Redes",
         "Inventario Eidico",
         "Lanzador Eidico",
-        "Suite-M365-Saneamiento"
+        "Suite-M365-Saneamiento",
+        "Utilidades"
     )
 
     foreach ($rel in $candidatas) {
