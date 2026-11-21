@@ -1,0 +1,1 @@
+New-LocalUser -Name "Usuario" -Password ("1234" | ConvertTo-SecureString -AsPlainText -Force) -FullName "Usuario" -Description "Cuenta local"

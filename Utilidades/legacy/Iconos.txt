@@ -1,0 +1,13 @@
+Stop-Process -Name explorer -Force
+Remove-Item -Path "$env:LOCALAPPDATA\IconCache.db" -Force
+Remove-Item -Path "$env:LOCALAPPDATA\Microsoft\Windows\Explorer\iconcache*" -Force
+Start-Process explorer.exe
+
+
+Get-AppxPackage -AllUsers | Foreach {Add-AppxPackage -DisableDevelopmentMode -Register "$($_.InstallLocation)\AppXManifest.xml"}
+
+
+New-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer" -Name "Max Cached Icons" -Value "4096" -PropertyType String -Force
+
+
+ipconfig /flushdns
