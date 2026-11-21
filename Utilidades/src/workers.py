@@ -22,3 +22,23 @@ class TaskWorker(QThread):
             self.finished_signal.emit(ok, message)
         except Exception as exc:
             self.finished_signal.emit(False, f"Error inesperado: {exc}")
+
+
+class StreamingTaskWorker(QThread):
+    """Ejecuta una tarea de larga duración emitiendo logs y progreso en tiempo real."""
+
+    log_signal = pyqtSignal(str)
+    progress_signal = pyqtSignal(int)
+    finished_signal = pyqtSignal(bool, str)
+
+    def __init__(self, task_fn: Callable[..., tuple[bool, str]]) -> None:
+        super().__init__()
+        self._task_fn = task_fn
+
+    def run(self) -> None:
+        """Ejecuta la tarea pasando callbacks seguros hacia señales Qt."""
+        try:
+            ok, message = self._task_fn(self.log_signal.emit, self.progress_signal.emit)
+            self.finished_signal.emit(ok, message)
+        except Exception as exc:
+            self.finished_signal.emit(False, f"Error inesperado: {exc}")

@@ -15,8 +15,8 @@ Se han importado 6 archivos heredados en la carpeta `legacy/` que conforman la b
 - [x] **Fase 2 - Motor de ejecución**: Implementar `src/workers.py` y ejecución silenciosa (`CREATE_NO_WINDOW`), captura de salida, verificación UAC nativa (`src/main.py`) y manejo de errores.
 - [/] **Fase 3 - Módulos funcionales**:
   - [x] `src/core/system_tweaks.py` (Hibernación / Inicio Rápido y creación de usuarios locales).
-  - [ ] `src/core/system_repair.py` (`DISM` y `SFC`).
+  - [x] `src/core/system_repair.py` (`DISM` y `SFC` con streaming en vivo).
   - [ ] `src/core/diagnostics.py` (S.M.A.R.T., batería, RAM/Uptime, BSOD y exportación de reporte).
   - [x] `src/core/shell_repair.py` (Caché de iconos, `Max Cached Icons`, AppX con `MpsSvc`, `ipconfig /flushdns`).
-- [/] **Fase 4 - Interfaz PyQt6**: Diseñar UI oscura monocromática por pestañas (`src/ui/main_window.py`) con visor de logs (completadas pestañas **Energía y Cuentas** y **Shell, Iconos y Red**).
+- [/] **Fase 4 - Interfaz PyQt6**: Diseñar UI oscura monocromática por pestañas (`src/ui/main_window.py`) con visor de logs (completadas pestañas **Reparación de Sistema**, **Energía y Cuentas** y **Shell, Iconos y Red**).
 - [ ] **Fase 5 - Empaquetado y portabilidad**: Configurar compilación standalone (PyInstaller con manifiesto UAC) y evaluar portado puntual de utilidades hacia `EzSetup` manteniendo ambos proyectos desacoplados.

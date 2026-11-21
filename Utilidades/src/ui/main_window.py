@@ -12,11 +12,12 @@ from PyQt6.QtWidgets import (
     QPushButton,
     QPlainTextEdit,
     QFormLayout,
+    QProgressBar,
 )
 from PyQt6.QtCore import Qt
 
 from config import APP_NAME, APP_VERSION, WINDOW_MIN_WIDTH, WINDOW_MIN_HEIGHT
-from workers import TaskWorker
+from workers import TaskWorker, StreamingTaskWorker
 from core.system_tweaks import get_hibernation_status, set_hibernation, create_local_user
 from core.shell_repair import (
     rebuild_icon_cache,
@@ -24,6 +25,13 @@ from core.shell_repair import (
     set_max_cached_icons,
     reregister_appx_packages,
     flush_dns,
+)
+from core.system_repair import (
+    dism_scan_health,
+    dism_restore_health,
+    dism_component_cleanup,
+    sfc_scannow,
+    run_full_repair,
 )
 
 
@@ -48,9 +56,16 @@ class MainWindow(QMainWindow):
         main_layout.setSpacing(12)
 
         self.tabs = QTabWidget()
+        self.tabs.addTab(self._build_repair_tab(), "Reparación de Sistema")
         self.tabs.addTab(self._build_tweaks_tab(), "Energía y Cuentas")
         self.tabs.addTab(self._build_shell_tab(), "Shell, Iconos y Red")
         main_layout.addWidget(self.tabs, stretch=2)
+
+        self.repair_progress = QProgressBar()
+        self.repair_progress.setRange(0, 100)
+        self.repair_progress.setValue(0)
+        self.repair_progress.setVisible(False)
+        main_layout.addWidget(self.repair_progress)
 
         log_group = QGroupBox("Registro de Actividad")
         log_layout = QVBoxLayout(log_group)
@@ -58,6 +73,61 @@ class MainWindow(QMainWindow):
         self.log_output.setReadOnly(True)
         log_layout.addWidget(self.log_output)
         main_layout.addWidget(log_group, stretch=1)
+
+    def _build_repair_tab(self) -> QWidget:
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+        layout.setSpacing(12)
+
+        # Tarjeta 1: DISM ScanHealth y RestoreHealth
+        dism_group = QGroupBox("Almacén de Componentes de Windows (DISM)")
+        dism_layout = QVBoxLayout(dism_group)
+        dism_desc = QLabel("Analiza o repara la imagen del sistema operativo sin reiniciar el equipo.")
+        dism_layout.addWidget(dism_desc)
+
+        dism_btns = QHBoxLayout()
+        self.btn_dism_scan = QPushButton("DISM /ScanHealth")
+        self.btn_dism_restore = QPushButton("DISM /RestoreHealth")
+        self.btn_dism_cleanup = QPushButton("DISM /StartComponentCleanup")
+        self.btn_dism_scan.clicked.connect(lambda: self._run_streaming_task(dism_scan_health, "Ejecutando DISM /ScanHealth..."))
+        self.btn_dism_restore.clicked.connect(lambda: self._run_streaming_task(dism_restore_health, "Ejecutando DISM /RestoreHealth..."))
+        self.btn_dism_cleanup.clicked.connect(lambda: self._run_streaming_task(dism_component_cleanup, "Ejecutando DISM /StartComponentCleanup..."))
+        dism_btns.addWidget(self.btn_dism_scan)
+        dism_btns.addWidget(self.btn_dism_restore)
+        dism_btns.addWidget(self.btn_dism_cleanup)
+        dism_layout.addLayout(dism_btns)
+        layout.addWidget(dism_group)
+
+        # Tarjeta 2: SFC /scannow
+        sfc_group = QGroupBox("Comprobador de Archivos de Sistema (SFC)")
+        sfc_layout = QVBoxLayout(sfc_group)
+        sfc_desc = QLabel("Verifica y repara archivos protegidos del sistema Windows (sfc /scannow).")
+        sfc_layout.addWidget(sfc_desc)
+        self.btn_sfc = QPushButton("Ejecutar SFC /scannow")
+        self.btn_sfc.clicked.connect(lambda: self._run_streaming_task(sfc_scannow, "Ejecutando SFC /scannow..."))
+        sfc_layout.addWidget(self.btn_sfc)
+        layout.addWidget(sfc_group)
+
+        # Tarjeta 3: Reparación Completa Automática
+        full_group = QGroupBox("Secuencia Guiada")
+        full_layout = QVBoxLayout(full_group)
+        full_desc = QLabel("Ejecuta en orden: ScanHealth -> RestoreHealth (si aplica) -> SFC /scannow -> StartComponentCleanup.")
+        full_layout.addWidget(full_desc)
+        self.btn_full_repair = QPushButton("Reparación Completa Automática")
+        self.btn_full_repair.clicked.connect(lambda: self._run_streaming_task(run_full_repair, "Iniciando reparación completa automática..."))
+        full_layout.addWidget(self.btn_full_repair)
+        layout.addWidget(full_group)
+
+        self._action_buttons.extend([
+            self.btn_dism_scan,
+            self.btn_dism_restore,
+            self.btn_dism_cleanup,
+            self.btn_sfc,
+            self.btn_full_repair,
+        ])
+
+        layout.addStretch()
+        return tab
 
     def _build_tweaks_tab(self) -> QWidget:
         tab = QWidget()
@@ -216,7 +286,30 @@ class MainWindow(QMainWindow):
         self._active_worker.finished_signal.connect(self._on_task_finished)
         self._active_worker.start()
 
+    def _run_streaming_task(self, fn, status_msg: str = "") -> None:
+        if self._active_worker is not None and self._active_worker.isRunning():
+            return
+        if status_msg:
+            self.log_output.appendPlainText(f"[INFO] {status_msg}")
+        self._set_controls_enabled(False)
+        self.repair_progress.setRange(0, 0)
+        self.repair_progress.setVisible(True)
+        worker = StreamingTaskWorker(fn)
+        worker.log_signal.connect(self.log_output.appendPlainText)
+        worker.progress_signal.connect(self._on_progress_update)
+        worker.finished_signal.connect(self._on_task_finished)
+        self._active_worker = worker
+        worker.start()
+
+    def _on_progress_update(self, value: int) -> None:
+        if value < 0:
+            self.repair_progress.setRange(0, 0)
+        else:
+            self.repair_progress.setRange(0, 100)
+            self.repair_progress.setValue(value)
+
     def _on_task_finished(self, ok: bool, message: str) -> None:
+        self.repair_progress.setVisible(False)
         self._append_log(ok, message)
         self._refresh_hibernation_status()
         self._refresh_max_icons_status()
