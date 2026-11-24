@@ -32,6 +32,8 @@ from core.shell_repair import (
     get_max_cached_icons,
     set_max_cached_icons,
     reregister_appx_packages,
+    clean_temp_and_update_cache,
+    restart_print_spooler,
 )
 from core.system_repair import (
     dism_scan_health,
@@ -42,6 +44,7 @@ from core.system_repair import (
 )
 from core.diagnostics import (
     get_smart_health,
+    get_fixed_partitions,
     get_battery_health,
     get_system_stability,
     export_diagnostic_report,
@@ -77,7 +80,7 @@ class MainWindow(QMainWindow):
         self.tabs.addTab(self._build_repair_tab(), "Reparación de Sistema")
         self.tabs.addTab(self._build_diagnostics_tab(), "Diagnóstico y Hardware")
         self.tabs.addTab(self._build_tweaks_tab(), "Energía y Cuentas")
-        self.tabs.addTab(self._build_shell_tab(), "Shell e Iconos")
+        self.tabs.addTab(self._build_shell_tab(), "Shell y Mantenimiento")
         main_layout.addWidget(self.tabs, stretch=2)
 
         self.repair_progress = QProgressBar()
@@ -95,7 +98,8 @@ class MainWindow(QMainWindow):
         self.btn_log_clear = QPushButton("Limpiar")
         self.btn_log_save = QPushButton("Guardar .log")
         for btn in (self.btn_log_copy, self.btn_log_clear, self.btn_log_save):
-            btn.setMinimumHeight(28)
+            btn.setMinimumHeight(30)
+            btn.setStyleSheet("padding: 2px 12px;")
         self.btn_log_copy.clicked.connect(self._handle_copy_log)
         self.btn_log_clear.clicked.connect(self._handle_clear_log)
         self.btn_log_save.clicked.connect(self._handle_save_log)
@@ -169,7 +173,7 @@ class MainWindow(QMainWindow):
         layout = QVBoxLayout(tab)
         layout.setSpacing(12)
 
-        smart_group = QGroupBox("Discos Físicos (S.M.A.R.T.)")
+        smart_group = QGroupBox("Discos Físicos y Particiones (S.M.A.R.T.)")
         smart_layout = QVBoxLayout(smart_group)
         self.smart_label = QLabel("Sin datos. Ejecutá el diagnóstico para consultar.")
         self.smart_label.setWordWrap(True)
@@ -320,6 +324,33 @@ class MainWindow(QMainWindow):
         appx_layout.addWidget(self.btn_reregister_appx)
         layout.addWidget(appx_group)
 
+        # Tarjeta 4: Limpieza de Temporales y Caché de Windows Update
+        temp_group = QGroupBox("Limpieza de Temporales y Caché de Windows Update")
+        temp_layout = QVBoxLayout(temp_group)
+        temp_top = QHBoxLayout()
+        temp_desc = QLabel("Limpia %TEMP% y C:\\Windows\\Temp ignorando archivos en uso.")
+        temp_desc.setObjectName("StatusLabel")
+        self.btn_clean_temp = QPushButton("Limpiar Temporales")
+        self.btn_clean_temp.clicked.connect(self._handle_clean_temp)
+        temp_top.addWidget(temp_desc, stretch=1)
+        temp_top.addWidget(self.btn_clean_temp)
+        temp_layout.addLayout(temp_top)
+
+        self.chk_clean_wu = QCheckBox("Incluir caché de Windows Update (detiene wuauserv/bits y limpia SoftwareDistribution\\Download)")
+        temp_layout.addWidget(self.chk_clean_wu)
+        layout.addWidget(temp_group)
+
+        # Tarjeta 5: Cola de Impresión (Spooler)
+        spool_group = QGroupBox("Cola de Impresión (Spooler)")
+        spool_layout = QHBoxLayout(spool_group)
+        spool_desc = QLabel("Detiene Spooler, vacía trabajos atascados en PRINTERS y reinicia el servicio.")
+        spool_desc.setObjectName("StatusLabel")
+        self.btn_restart_spooler = QPushButton("Reiniciar Cola de Impresión")
+        self.btn_restart_spooler.clicked.connect(self._handle_restart_spooler)
+        spool_layout.addWidget(spool_desc, stretch=1)
+        spool_layout.addWidget(self.btn_restart_spooler)
+        layout.addWidget(spool_group)
+
         self._action_buttons.extend([
             self.btn_hiber_off,
             self.btn_hiber_on,
@@ -328,6 +359,8 @@ class MainWindow(QMainWindow):
             self.btn_rebuild_icons,
             self.btn_set_max_icons,
             self.btn_reregister_appx,
+            self.btn_clean_temp,
+            self.btn_restart_spooler,
         ])
 
         layout.addStretch()
@@ -409,6 +442,25 @@ class MainWindow(QMainWindow):
         ):
             self._run_task(reregister_appx_packages, "Re-registrando paquetes AppX (puede demorar)...")
 
+    def _handle_clean_temp(self) -> None:
+        include_wu = self.chk_clean_wu.isChecked()
+        if include_wu and not self._confirm_action(
+            "Confirmar Limpieza con Windows Update",
+            "Se limpiarán los archivos temporales y se detendrán temporalmente los servicios wuauserv y bits para vaciar SoftwareDistribution\\Download.\n\n"
+            "¿Deseás continuar?",
+        ):
+            return
+        msg = "Limpiando temporales y caché de Windows Update..." if include_wu else "Limpiando archivos temporales..."
+        self._run_task(clean_temp_and_update_cache, msg, include_wu)
+
+    def _handle_restart_spooler(self) -> None:
+        if self._confirm_action(
+            "Confirmar Reinicio de Cola de Impresión",
+            "Se detendrá el servicio Spooler, se eliminarán todos los documentos pendientes en spool\\PRINTERS y se reiniciará el servicio.\n\n"
+            "¿Deseás continuar?",
+        ):
+            self._run_task(restart_print_spooler, "Reiniciando cola de impresión (Spooler)...")
+
     def _handle_open_battery_html(self) -> None:
         report_path = self._get_battery_report_path()
         if not report_path.exists():
@@ -454,10 +506,12 @@ class MainWindow(QMainWindow):
 
     def _run_diagnostics_bundle(self) -> tuple[bool, str]:
         _, smart_msg = get_smart_health()
+        _, part_msg = get_fixed_partitions()
         _, battery_msg = get_battery_health()
         _, stability_msg = get_system_stability()
         self._diag_results = {
             "smart": smart_msg,
+            "partitions": part_msg,
             "battery": battery_msg,
             "stability": stability_msg,
         }
@@ -474,7 +528,10 @@ class MainWindow(QMainWindow):
 
     def _on_diagnostics_finished(self, ok: bool, message: str) -> None:
         if self._diag_results:
-            self.smart_label.setText(self._diag_results.get("smart", "N/D"))
+            smart_txt = self._diag_results.get("smart", "N/D")
+            part_txt = self._diag_results.get("partitions", "")
+            combined_disks = f"{smart_txt}\n\nParticiones fijas:\n{part_txt}" if part_txt else smart_txt
+            self.smart_label.setText(combined_disks)
             self.battery_label.setText(self._diag_results.get("battery", "N/D"))
             self.stability_label.setText(self._diag_results.get("stability", "N/D"))
         self._append_log(ok, message)

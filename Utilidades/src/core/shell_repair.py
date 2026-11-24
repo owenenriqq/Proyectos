@@ -1,6 +1,7 @@
-"""Módulo de reparación de Shell, caché de iconos, paquetes AppX y red."""
+"""Módulo de reparación de Shell, caché de iconos, paquetes AppX y mantenimiento rápido."""
 
 import os
+import shutil
 import subprocess
 import time
 import winreg
@@ -120,3 +121,95 @@ def reregister_appx_packages() -> tuple[bool, str]:
         return False, f"Error al re-registrar paquetes AppX: {err}"
 
     return True, "Paquetes AppX re-registrados correctamente (servicio MpsSvc verificado)."
+
+
+def _clear_directory_contents(directory: Path) -> tuple[int, int]:
+    """Elimina archivos y subcarpetas dentro de un directorio ignorando elementos en uso."""
+    removed = 0
+    skipped = 0
+    if not directory.exists():
+        return 0, 0
+    for item in directory.iterdir():
+        try:
+            if item.is_dir() and not item.is_symlink():
+                shutil.rmtree(item, ignore_errors=False)
+            else:
+                item.unlink()
+            removed += 1
+        except OSError:
+            skipped += 1
+    return removed, skipped
+
+
+def clean_temp_and_update_cache(clean_wu_cache: bool = False) -> tuple[bool, str]:
+    """Limpia %TEMP%, C:\\Windows\\Temp y opcionalmente la caché de Windows Update."""
+    total_removed = 0
+    total_skipped = 0
+
+    user_temp = os.environ.get("TEMP") or os.environ.get("TMP")
+    win_root = os.environ.get("SystemRoot", r"C:\Windows")
+    targets = [Path(win_root) / "Temp"]
+    if user_temp:
+        targets.insert(0, Path(user_temp))
+
+    for target in targets:
+        rem, skip = _clear_directory_contents(target)
+        total_removed += rem
+        total_skipped += skip
+
+    if not clean_wu_cache:
+        return True, (
+            f"Temporales limpiados ({total_removed} elementos eliminados, "
+            f"{total_skipped} en uso omitidos)."
+        )
+
+    # Detener servicios de Windows Update antes de vaciar SoftwareDistribution\Download
+    for svc in ("wuauserv", "bits"):
+        _run_silent(["net", "stop", svc], encoding="cp850")
+
+    wu_download = Path(win_root) / "SoftwareDistribution" / "Download"
+    wu_rem, wu_skip = _clear_directory_contents(wu_download)
+    total_removed += wu_rem
+    total_skipped += wu_skip
+
+    start_errors: list[str] = []
+    for svc in ("bits", "wuauserv"):
+        res = _run_silent(["net", "start", svc], encoding="cp850")
+        if res.returncode != 0:
+            out = (res.stdout or res.stderr or "").strip()
+            # Código 2 o texto "ya se ha iniciado" no es fallo real
+            if "ya se ha iniciado" not in out.lower() and "already been started" not in out.lower():
+                start_errors.append(f"{svc}: {out}")
+
+    if start_errors:
+        return False, (
+            f"Temporales y caché de Windows Update limpiados ({total_removed} eliminados, "
+            f"{total_skipped} omitidos), pero hubo errores al reiniciar servicios: {'; '.join(start_errors)}"
+        )
+
+    return True, (
+        f"Temporales y caché de Windows Update limpiados ({total_removed} elementos eliminados, "
+        f"{total_skipped} en uso omitidos; servicios reiniciados)."
+    )
+
+
+def restart_print_spooler() -> tuple[bool, str]:
+    """Detiene Spooler, vacía la cola de impresión (PRINTERS) y reinicia el servicio."""
+    win_root = os.environ.get("SystemRoot", r"C:\Windows")
+    printers_dir = Path(win_root) / "System32" / "spool" / "PRINTERS"
+
+    stop_res = _run_silent(["net", "stop", "Spooler"], encoding="cp850")
+    if stop_res.returncode != 0:
+        sc_res = _run_silent(["sc", "query", "Spooler"], encoding="cp850")
+        if "STOPPED" not in sc_res.stdout.upper():
+            err = stop_res.stderr.strip() or stop_res.stdout.strip()
+            return False, f"No se pudo detener la cola de impresión (Spooler): {err}"
+
+    removed, skipped = _clear_directory_contents(printers_dir)
+
+    start_res = _run_silent(["net", "start", "Spooler"], encoding="cp850")
+    if start_res.returncode != 0:
+        err = start_res.stderr.strip() or start_res.stdout.strip()
+        return False, f"Cola vaciada ({removed} eliminados), pero falló al iniciar Spooler: {err}"
+
+    return True, f"Cola de impresión reiniciada ({removed} archivos eliminados, {skipped} omitidos)."

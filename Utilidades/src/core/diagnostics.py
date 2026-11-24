@@ -35,15 +35,31 @@ def _run_ps_json(ps_one_liner: str) -> tuple[bool, Any, str]:
         return False, None, f"Error al parsear JSON de PowerShell: {exc}"
 
 
+def _format_capacity(size_bytes: Any) -> str:
+    """Formatea una capacidad en bytes a GB o TB legibles."""
+    try:
+        size = int(size_bytes)
+    except (TypeError, ValueError):
+        return "N/D"
+    if size <= 0:
+        return "N/D"
+    tb = 1024 ** 4
+    gb = 1024 ** 3
+    if size >= tb:
+        return f"{size / tb:.2f} TB"
+    return f"{size / gb:.1f} GB"
+
+
 def get_smart_health() -> tuple[bool, str]:
-    """Consulta discos físicos y contadores S.M.A.R.T. vía PowerShell."""
+    """Consulta discos físicos internos y contadores S.M.A.R.T. vía PowerShell."""
     ps_cmd = (
         "Get-PhysicalDisk | Where-Object { $_.BusType -ne 'USB' } | ForEach-Object { "
         "$rel = $_ | Get-StorageReliabilityCounter -ErrorAction SilentlyContinue; "
         "[PSCustomObject]@{ "
-        "Model=$_.FriendlyName; Bus=$_.BusType.ToString(); "
+        "Model=$_.FriendlyName; MediaType=$_.MediaType.ToString(); "
+        "Bus=$_.BusType.ToString(); Size=$_.Size; "
         "OpStatus=$_.OperationalStatus.ToString(); Health=$_.HealthStatus.ToString(); "
-        "Temp=$rel.Temperature; Wear=$rel.Wear } "
+        "Temp=$rel.Temperature; ReadErrors=$rel.ReadErrorsTotal; WriteErrors=$rel.WriteErrorsTotal } "
         "} | ConvertTo-Json -Compress"
     )
     ok, data, err = _run_ps_json(ps_cmd)
@@ -52,18 +68,52 @@ def get_smart_health() -> tuple[bool, str]:
 
     disks = [data] if isinstance(data, dict) else (data or [])
     if not disks:
-        return True, "No se detectaron discos físicos."
+        return True, "No se detectaron discos físicos internos."
 
     lines: list[str] = []
     for d in disks:
         model = d.get("Model") or "Desconocido"
+        media = d.get("MediaType") or ""
         bus = d.get("Bus") or "-"
+        kind = f"{media}/{bus}" if media and media != "Unspecified" else bus
+        cap = _format_capacity(d.get("Size"))
         op = d.get("OpStatus") or "-"
         health = d.get("Health") or "-"
         raw_temp = d.get("Temp")
         temp = f"{raw_temp} °C" if raw_temp not in (None, 0) else "N/D"
-        wear = f"{100 - int(d['Wear'])}% restante" if d.get("Wear") is not None else "N/D"
-        lines.append(f"• {model} ({bus}) | Salud: {health} ({op}) | Temp: {temp} | Vida: {wear}")
+
+        read_err = int(d.get("ReadErrors") or 0)
+        write_err = int(d.get("WriteErrors") or 0)
+        err_part = f" | Errores R/W: {read_err}/{write_err}" if (read_err > 0 or write_err > 0) else ""
+
+        lines.append(f"• {model} ({kind}, {cap}) | Estado: {health} ({op}) | Temp: {temp}{err_part}")
+
+    return True, "\n".join(lines)
+
+
+def get_fixed_partitions() -> tuple[bool, str]:
+    """Consulta el espacio libre y total de las particiones fijas (DriveType = 3)."""
+    ps_cmd = (
+        "Get-CimInstance -ClassName Win32_LogicalDisk -Filter 'DriveType=3' | "
+        "Select-Object DeviceID, VolumeName, Size, FreeSpace | ConvertTo-Json -Compress"
+    )
+    ok, data, err = _run_ps_json(ps_cmd)
+    if not ok:
+        return False, f"Error al consultar particiones: {err}"
+
+    volumes = [data] if isinstance(data, dict) else (data or [])
+    if not volumes:
+        return True, "No se detectaron particiones fijas."
+
+    lines: list[str] = []
+    for v in volumes:
+        drive = v.get("DeviceID") or "?"
+        label = (v.get("VolumeName") or "").strip()
+        name = f"{drive} ({label})" if label else drive
+        size = int(v.get("Size") or 0)
+        free = int(v.get("FreeSpace") or 0)
+        pct_free = f"{(free / size) * 100:.1f}%" if size > 0 else "N/D"
+        lines.append(f"• {name}: {_format_capacity(free)} libre / {_format_capacity(size)} total ({pct_free} libre)")
 
     return True, "\n".join(lines)
 
@@ -152,6 +202,9 @@ def export_diagnostic_report(path: str, results: dict[str, str]) -> tuple[bool, 
             "",
             "--- 1. DISCOS FÍSICOS (S.M.A.R.T.) ---",
             results.get("smart", "Sin datos."),
+            "",
+            "--- 1b. PARTICIONES FIJAS ---",
+            results.get("partitions", "Sin datos."),
             "",
             "--- 2. SALUD DE BATERÍA ---",
             results.get("battery", "Sin datos."),
