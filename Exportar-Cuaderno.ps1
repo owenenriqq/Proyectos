@@ -34,9 +34,12 @@ if (Test-Path -LiteralPath $GeminiGlobal) {
 }
 
 # 3. Recorrer recursivamente las subcarpetas excluyendo directorios de sistema/compilación
-$Excluidos = @(".git", ".venv", "build", "dist", "__pycache__")
+$Excluidos = @(".git", ".venv", "build", "dist", "__pycache__", "legacy")
 
-$Archivos = Get-ChildItem -LiteralPath $Raiz -Recurse -File -Include "GEMINI.md", "ESTADO.md" | Where-Object {
+$Archivos = Get-ChildItem -LiteralPath $Raiz -Recurse -File | Where-Object {
+    # Filtro estricto por nombre de archivo
+    if ($_.Name -ne "GEMINI.md" -and $_.Name -ne "ESTADO.md") { return $false }
+
     # Excluir el GEMINI.md de la raíz (ya procesado)
     if ($_.DirectoryName -eq $Raiz) { return $false }
 
@@ -50,8 +53,8 @@ $Archivos = Get-ChildItem -LiteralPath $Raiz -Recurse -File -Include "GEMINI.md"
 }
 
 foreach ($Archivo in $Archivos) {
-    $NombrePadre = $Archivo.Directory.Name
-    $NombreDestino = "${NombrePadre}_$($Archivo.Name)"
+    $Relativa = $Archivo.FullName.Substring($Raiz.Length).TrimStart('\', '/')
+    $NombreDestino = $Relativa -replace '[\\/]', '_'
     $RutaDestino = Join-Path $Destino $NombreDestino
 
     $Contenido = [System.IO.File]::ReadAllText($Archivo.FullName)
