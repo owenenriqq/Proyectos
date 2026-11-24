@@ -38,7 +38,7 @@ def _run_ps_json(ps_one_liner: str) -> tuple[bool, Any, str]:
 def get_smart_health() -> tuple[bool, str]:
     """Consulta discos físicos y contadores S.M.A.R.T. vía PowerShell."""
     ps_cmd = (
-        "Get-PhysicalDisk | ForEach-Object { "
+        "Get-PhysicalDisk | Where-Object { $_.BusType -ne 'USB' } | ForEach-Object { "
         "$rel = $_ | Get-StorageReliabilityCounter -ErrorAction SilentlyContinue; "
         "[PSCustomObject]@{ "
         "Model=$_.FriendlyName; Bus=$_.BusType.ToString(); "
@@ -60,7 +60,8 @@ def get_smart_health() -> tuple[bool, str]:
         bus = d.get("Bus") or "-"
         op = d.get("OpStatus") or "-"
         health = d.get("Health") or "-"
-        temp = f"{d['Temp']} °C" if d.get("Temp") is not None else "N/D"
+        raw_temp = d.get("Temp")
+        temp = f"{raw_temp} °C" if raw_temp not in (None, 0) else "N/D"
         wear = f"{100 - int(d['Wear'])}% restante" if d.get("Wear") is not None else "N/D"
         lines.append(f"• {model} ({bus}) | Salud: {health} ({op}) | Temp: {temp} | Vida: {wear}")
 

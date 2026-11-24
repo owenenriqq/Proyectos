@@ -120,13 +120,3 @@ def reregister_appx_packages() -> tuple[bool, str]:
         return False, f"Error al re-registrar paquetes AppX: {err}"
 
     return True, "Paquetes AppX re-registrados correctamente (servicio MpsSvc verificado)."
-
-
-def flush_dns() -> tuple[bool, str]:
-    """Limpia la caché de resolución DNS mediante ipconfig /flushdns."""
-    res = _run_silent(["ipconfig", "/flushdns"], encoding="cp850")
-    output = (res.stdout or res.stderr or "").strip()
-    if res.returncode != 0:
-        return False, f"Error al limpiar caché DNS: {output}"
-    clean_line = " | ".join(line.strip() for line in output.splitlines() if line.strip())
-    return True, clean_line or "Caché de resolución DNS vaciada correctamente."

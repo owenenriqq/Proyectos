@@ -32,7 +32,6 @@ from core.shell_repair import (
     get_max_cached_icons,
     set_max_cached_icons,
     reregister_appx_packages,
-    flush_dns,
 )
 from core.system_repair import (
     dism_scan_health,
@@ -78,7 +77,7 @@ class MainWindow(QMainWindow):
         self.tabs.addTab(self._build_repair_tab(), "Reparación de Sistema")
         self.tabs.addTab(self._build_diagnostics_tab(), "Diagnóstico y Hardware")
         self.tabs.addTab(self._build_tweaks_tab(), "Energía y Cuentas")
-        self.tabs.addTab(self._build_shell_tab(), "Shell, Iconos y Red")
+        self.tabs.addTab(self._build_shell_tab(), "Shell e Iconos")
         main_layout.addWidget(self.tabs, stretch=2)
 
         self.repair_progress = QProgressBar()
@@ -96,7 +95,7 @@ class MainWindow(QMainWindow):
         self.btn_log_clear = QPushButton("Limpiar")
         self.btn_log_save = QPushButton("Guardar .log")
         for btn in (self.btn_log_copy, self.btn_log_clear, self.btn_log_save):
-            btn.setFixedHeight(26)
+            btn.setMinimumHeight(28)
         self.btn_log_copy.clicked.connect(self._handle_copy_log)
         self.btn_log_clear.clicked.connect(self._handle_clear_log)
         self.btn_log_save.clicked.connect(self._handle_save_log)
@@ -321,17 +320,6 @@ class MainWindow(QMainWindow):
         appx_layout.addWidget(self.btn_reregister_appx)
         layout.addWidget(appx_group)
 
-        # Tarjeta 4: Red / DNS
-        dns_group = QGroupBox("Red y Resolución DNS")
-        dns_layout = QHBoxLayout(dns_group)
-        dns_desc = QLabel("Vacía la caché de resolución DNS del sistema (ipconfig /flushdns).")
-        dns_desc.setObjectName("StatusLabel")
-        self.btn_flush_dns = QPushButton("Limpiar Caché DNS")
-        self.btn_flush_dns.clicked.connect(lambda: self._run_task(flush_dns, "Limpiando caché DNS..."))
-        dns_layout.addWidget(dns_desc, stretch=1)
-        dns_layout.addWidget(self.btn_flush_dns)
-        layout.addWidget(dns_group)
-
         self._action_buttons.extend([
             self.btn_hiber_off,
             self.btn_hiber_on,
@@ -340,7 +328,6 @@ class MainWindow(QMainWindow):
             self.btn_rebuild_icons,
             self.btn_set_max_icons,
             self.btn_reregister_appx,
-            self.btn_flush_dns,
         ])
 
         layout.addStretch()
