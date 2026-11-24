@@ -14,7 +14,7 @@ Se han importado 6 archivos heredados en la carpeta `legacy/` que conforman la b
 - [x] **Fase 1 - Estructura base**: Inicializar entorno virtual Python 3.12 (`.venv`), `requirements.txt` (PyQt6), `.gitignore` y estructura modular (`src/core/`, `src/ui/`, `assets/`).
 - [x] **Fase 2 - Motor de ejecución**: Implementar `src/workers.py` y ejecución silenciosa (`CREATE_NO_WINDOW`), captura de salida, verificación UAC nativa (`src/main.py`) y manejo de errores.
 - [x] **Fase 3 - Módulos funcionales**:
-  - [x] `src/core/system_tweaks.py` (Hibernación / Inicio Rápido y creación de usuarios locales).
+  - [x] `src/core/system_tweaks.py` (Hibernación e Inicio Rápido con lectura/control separado vía `hiberfil.sys` y `HiberbootEnabled`, y creación de usuarios locales).
   - [x] `src/core/system_repair.py` (`DISM` y `SFC` con streaming en vivo, decodificación UTF-16LE robusta y deduplicación de progreso).
   - [x] `src/core/diagnostics.py` (S.M.A.R.T. filtrando `BusType -ne 'USB'` con MediaType/Bus, capacidad, Temp `N/D` y errores R/W > 0, particiones fijas `DriveType=3`, batería, RAM/Uptime, BSOD y exportación de reporte).
   - [x] `src/core/shell_repair.py` (Caché de iconos, `Max Cached Icons`, AppX con `MpsSvc`, limpieza de temporales/Windows Update y reinicio de cola de impresión `Spooler`).

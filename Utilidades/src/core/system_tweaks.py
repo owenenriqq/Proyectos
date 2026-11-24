@@ -2,9 +2,12 @@
 
 import os
 import subprocess
+import winreg
 from typing import Sequence
 
 CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
+POWER_REG_PATH = r"SYSTEM\CurrentControlSet\Control\Session Manager\Power"
+HIBERBOOT_KEY = "HiberbootEnabled"
 
 
 def _run_silent(command: Sequence[str]) -> subprocess.CompletedProcess[str]:
@@ -20,22 +23,59 @@ def _run_silent(command: Sequence[str]) -> subprocess.CompletedProcess[str]:
     )
 
 
+def _get_hiberboot_enabled() -> bool | None:
+    """Lee el valor DWORD HiberbootEnabled del Registro (Inicio Rápido)."""
+    try:
+        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, POWER_REG_PATH, 0, winreg.KEY_READ) as key:
+            value, _ = winreg.QueryValueEx(key, HIBERBOOT_KEY)
+            return bool(int(value))
+    except (FileNotFoundError, OSError, ValueError):
+        return None
+
+
+def _set_hiberboot_enabled(enabled: bool) -> tuple[bool, str]:
+    """Establece HiberbootEnabled (1 o 0) en HKLM."""
+    try:
+        with winreg.CreateKeyEx(winreg.HKEY_LOCAL_MACHINE, POWER_REG_PATH, 0, winreg.KEY_SET_VALUE) as key:
+            winreg.SetValueEx(key, HIBERBOOT_KEY, 0, winreg.REG_DWORD, 1 if enabled else 0)
+        return True, ""
+    except OSError as exc:
+        return False, f"No se pudo actualizar {HIBERBOOT_KEY}: {exc}"
+
+
 def get_hibernation_status() -> tuple[bool, str]:
-    """Verifica si el archivo de hibernación (C:\\hiberfil.sys) existe actualmente."""
+    """Verifica por separado el estado de Hibernación (hiberfil.sys) e Inicio Rápido (HiberbootEnabled)."""
     hiber_exists = os.path.exists(r"C:\hiberfil.sys")
-    if hiber_exists:
-        return True, "Hibernación / Inicio Rápido: ACTIVO (C:\\hiberfil.sys presente)."
-    return False, "Hibernación / Inicio Rápido: DESACTIVADO (C:\\hiberfil.sys ausente)."
+    fast_boot = _get_hiberboot_enabled()
+
+    hiber_txt = "ACTIVA (hiberfil.sys presente)" if hiber_exists else "DESACTIVADA (hiberfil.sys ausente)"
+    if fast_boot is True:
+        fast_txt = "ACTIVO"
+    elif fast_boot is False:
+        fast_txt = "DESACTIVADO"
+    else:
+        fast_txt = "N/D"
+
+    return (hiber_exists or bool(fast_boot)), f"Hibernación: {hiber_txt} | Inicio Rápido: {fast_txt}"
 
 
-def set_hibernation(enabled: bool) -> tuple[bool, str]:
-    """Activa o desactiva la hibernación e inicio rápido mediante powercfg."""
+def set_hibernation(enabled: bool, include_fast_boot: bool = False) -> tuple[bool, str]:
+    """Activa o desactiva la hibernación y opcionalmente el Inicio Rápido."""
     flag = "on" if enabled else "off"
     res = _run_silent(["powercfg", "-h", flag])
 
     if res.returncode != 0:
         err = res.stderr.strip() or res.stdout.strip() or f"Código de salida {res.returncode}"
         return False, f"No se pudo cambiar la hibernación ({flag}): {err}"
+
+    if not enabled:
+        ok_reg, reg_err = _set_hiberboot_enabled(False)
+        if not ok_reg:
+            return False, reg_err
+    elif include_fast_boot:
+        ok_reg, reg_err = _set_hiberboot_enabled(True)
+        if not ok_reg:
+            return False, reg_err
 
     _, status_msg = get_hibernation_status()
     return True, f"Operación completada (powercfg -h {flag}). {status_msg}"

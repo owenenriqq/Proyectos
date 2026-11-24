@@ -235,13 +235,16 @@ class MainWindow(QMainWindow):
         self.hiber_status_label.setObjectName("StatusLabel")
         power_layout.addWidget(self.hiber_status_label)
 
+        self.chk_fast_boot = QCheckBox("Incluir Inicio Rápido al activar (HiberbootEnabled = 1)")
+        power_layout.addWidget(self.chk_fast_boot)
+
         btn_row = QHBoxLayout()
         self.btn_hiber_off = QPushButton("Desactivar Hibernación / Inicio Rápido")
         self.btn_hiber_on = QPushButton("Activar Hibernación")
         self.btn_hiber_refresh = QPushButton("Actualizar Estado")
 
-        self.btn_hiber_off.clicked.connect(lambda: self._run_task(set_hibernation, "Desactivando hibernación...", False))
-        self.btn_hiber_on.clicked.connect(lambda: self._run_task(set_hibernation, "Activando hibernación...", True))
+        self.btn_hiber_off.clicked.connect(lambda: self._run_task(set_hibernation, "Desactivando hibernación e Inicio Rápido...", False))
+        self.btn_hiber_on.clicked.connect(lambda: self._run_task(set_hibernation, "Activando hibernación...", True, self.chk_fast_boot.isChecked()))
         self.btn_hiber_refresh.clicked.connect(self._refresh_hibernation_status)
 
         btn_row.addWidget(self.btn_hiber_off)
