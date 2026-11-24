@@ -8,21 +8,31 @@ CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
 _PERCENT_RE = re.compile(r"(\d{1,3}(?:[.,]\d+)?)\s*%")
 
 
+_CTRL_CHARS_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f]")
+
+
 def _decode_console_bytes(raw: bytes) -> str:
     """Decodifica bytes de consola Windows soportando UTF-16LE (sfc), UTF-8 y OEM cp850."""
     if not raw:
         return ""
-    if b"\x00" in raw:
-        try:
-            return raw.decode("utf-16le", errors="replace").replace("\x00", "")
-        except UnicodeDecodeError:
-            pass
+    if raw.startswith(b"\xff\xfe") or b"\x00" in raw:
+        if raw.startswith(b"\xff\xfe"):
+            raw = raw[2:]
+        if raw.startswith(b"\x00"):
+            raw = raw[1:]
+        if len(raw) % 2 == 1:
+            raw = raw + b"\x00"
+        text = raw.decode("utf-16-le", errors="replace")
+        text = text.replace("\ufeff", "").replace("\x00", "")
+        return _CTRL_CHARS_RE.sub("", text)
     for enc in ("utf-8", "cp850", "cp1252"):
         try:
-            return raw.decode(enc)
+            text = raw.decode(enc)
+            return _CTRL_CHARS_RE.sub("", text.replace("\ufeff", ""))
         except UnicodeDecodeError:
             continue
-    return raw.decode("cp850", errors="replace")
+    text = raw.decode("cp850", errors="replace")
+    return _CTRL_CHARS_RE.sub("", text.replace("\ufeff", ""))
 
 
 def _run_streaming(
@@ -38,22 +48,28 @@ def _run_streaming(
         creationflags=CREATE_NO_WINDOW,
     )
     lines: list[str] = []
+    last_pct: Optional[int] = None
     assert proc.stdout is not None
 
     for raw_line in iter(proc.stdout.readline, b""):
         text = _decode_console_bytes(raw_line).strip()
         if not text:
             continue
+
+        match = _PERCENT_RE.search(text)
+        if match:
+            try:
+                pct = max(0, min(100, int(float(match.group(1).replace(",", ".")))))
+                if pct == last_pct:
+                    continue
+                last_pct = pct
+                if progress_cb is not None:
+                    progress_cb(pct)
+            except ValueError:
+                pass
+
         lines.append(text)
         log_cb(text)
-        if progress_cb is not None:
-            match = _PERCENT_RE.search(text)
-            if match:
-                try:
-                    pct = int(float(match.group(1).replace(",", ".")))
-                    progress_cb(max(0, min(100, pct)))
-                except ValueError:
-                    pass
 
     proc.stdout.close()
     returncode = proc.wait()

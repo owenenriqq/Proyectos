@@ -20,9 +20,11 @@ from PyQt6.QtWidgets import (
     QFormLayout,
     QProgressBar,
     QFileDialog,
+    QScrollArea,
+    QFrame,
 )
 from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QCloseEvent, QIcon
+from PyQt6.QtGui import QCloseEvent, QGuiApplication, QIcon
 
 from config import APP_NAME, APP_VERSION, WINDOW_MIN_WIDTH, WINDOW_MIN_HEIGHT, resolve_resource_path
 from workers import TaskWorker, StreamingTaskWorker
@@ -57,8 +59,14 @@ class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
         self.setWindowTitle(f"{APP_NAME} v{APP_VERSION}")
-        self.setMinimumSize(WINDOW_MIN_WIDTH, WINDOW_MIN_HEIGHT)
-        self.resize(1080, 680)
+        self.setMinimumSize(1020, 760)
+        self.resize(1080, 820)
+        screen = QGuiApplication.primaryScreen()
+        if screen is not None:
+            avail = screen.availableGeometry()
+            frame = self.frameGeometry()
+            frame.moveCenter(avail.center())
+            self.move(frame.topLeft())
         icon_path = resolve_resource_path("assets/icon.ico")
         if icon_path.exists():
             self.setWindowIcon(QIcon(str(icon_path)))
@@ -174,6 +182,7 @@ class MainWindow(QMainWindow):
         layout.setSpacing(12)
 
         smart_group = QGroupBox("Discos Físicos y Particiones (S.M.A.R.T.)")
+        smart_group.setMinimumHeight(145)
         smart_layout = QVBoxLayout(smart_group)
         self.smart_label = QLabel("Sin datos. Ejecutá el diagnóstico para consultar.")
         self.smart_label.setWordWrap(True)
@@ -192,6 +201,7 @@ class MainWindow(QMainWindow):
         layout.addWidget(battery_group)
 
         stability_group = QGroupBox("Estabilidad, RAM y Eventos Críticos (BSOD)")
+        stability_group.setMinimumHeight(115)
         stability_layout = QVBoxLayout(stability_group)
         self.stability_label = QLabel("Sin datos. Ejecutá el diagnóstico para consultar.")
         self.stability_label.setWordWrap(True)
@@ -283,6 +293,10 @@ class MainWindow(QMainWindow):
         return tab
 
     def _build_shell_tab(self) -> QWidget:
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+
         tab = QWidget()
         layout = QVBoxLayout(tab)
         layout.setSpacing(12)
@@ -351,20 +365,27 @@ class MainWindow(QMainWindow):
         spool_layout.addWidget(self.btn_restart_spooler)
         layout.addWidget(spool_group)
 
-        self._action_buttons.extend([
-            self.btn_hiber_off,
-            self.btn_hiber_on,
-            self.btn_hiber_refresh,
-            self.btn_create_user,
+        shell_buttons = [
             self.btn_rebuild_icons,
             self.btn_set_max_icons,
             self.btn_reregister_appx,
             self.btn_clean_temp,
             self.btn_restart_spooler,
+        ]
+        for btn in shell_buttons:
+            btn.setMinimumHeight(36)
+
+        self._action_buttons.extend([
+            self.btn_hiber_off,
+            self.btn_hiber_on,
+            self.btn_hiber_refresh,
+            self.btn_create_user,
+            *shell_buttons,
         ])
 
         layout.addStretch()
-        return tab
+        scroll.setWidget(tab)
+        return scroll
 
     def _append_log(self, ok: bool, message: str) -> None:
         prefix = "[OK]" if ok else "[ERROR]"
