@@ -15,6 +15,23 @@ class ConfigError(Exception):
     """Error producido al cargar o validar config.json."""
 
 
+class UnauthorizedUNCHostError(PermissionError):
+    """Error lanzado cuando una ruta UNC apunta a un host no autorizado en config.json."""
+
+
+def validate_unc_host(path_str: str, allowed_hosts: set[str]) -> None:
+    """Valida que toda ruta UNC pertenezca a un host autorizado en config.json."""
+    normalized = path_str.strip()
+    if not normalized.startswith("\\\\"):
+        return
+    remainder = normalized.lstrip("\\")
+    host = remainder.split("\\", 1)[0].strip().lower()
+    if not host or host not in allowed_hosts:
+        raise UnauthorizedUNCHostError(
+            f"Host UNC no autorizado por config.json: '{host or normalized}'"
+        )
+
+
 REQUIRED_TOP_KEYS = (
     "app",
     "servers",
@@ -203,12 +220,18 @@ class AppConfig:
         return servers[key]
 
     def get_allowed_unc_hosts(self) -> set[str]:
-        """Devuelve el conjunto de hosts autorizados (en minúsculas) configurados en servers."""
+        """Devuelve el conjunto de hosts autorizados (en minúsculas) configurados en servers y security."""
         hosts: set[str] = set()
         for info in self.get_servers().values():
             host = str(info.get("host", "")).strip().lower()
             if host:
                 hosts.add(host)
+        extra_hosts = self.security.get("extra_allowed_unc_hosts", [])
+        if isinstance(extra_hosts, list):
+            for extra in extra_hosts:
+                clean = str(extra).strip().lower()
+                if clean:
+                    hosts.add(clean)
         return hosts
 
     def get_install_checks(self) -> dict[str, dict[str, Any]]:
@@ -268,6 +291,14 @@ class AppConfig:
             return external_asset
         return resolve_bundle_root() / "assets" / filename
 
+    @staticmethod
+    def get_asset_dir(dirname: str) -> Path:
+        """Resuelve un directorio de recursos priorizando la carpeta externa junto al ejecutable."""
+        external_dir = resolve_app_root() / "assets" / dirname
+        if external_dir.is_dir():
+            return external_dir
+        return resolve_bundle_root() / "assets" / dirname
+
     def get_default_credentials_enc_path(self) -> Path:
         """Retorna la ruta local predeterminada para credentials.enc junto a la app."""
         filename = self.get_local_path_raw("credentials_enc_file")
@@ -303,3 +334,28 @@ class AppConfig:
         if not isinstance(printers, dict):
             raise ConfigError("La sección 'printers' en config.json debe ser un objeto.")
         return printers
+
+    def get_inventory_config(self) -> dict[str, Any]:
+        """Retorna y valida la sección de configuración del módulo de inventario."""
+        inventory = self._data.get("inventory", {})
+        if not isinstance(inventory, dict):
+            raise ConfigError("La sección 'inventory' en config.json debe ser un objeto.")
+
+        network_dir = str(inventory.get("network_dir", "")).strip()
+        output_filename = str(inventory.get("output_filename", "")).strip()
+        if not network_dir or not output_filename:
+            raise ConfigError(
+                "La sección 'inventory' debe definir 'network_dir' y 'output_filename' no vacíos."
+            )
+
+        raw_props = inventory.get("property_options", [])
+        if isinstance(raw_props, list) and raw_props:
+            property_options = [str(p).strip() for p in raw_props if str(p).strip()]
+        else:
+            property_options = ["EIDICO", "Urbis", "Órbita", "Personal", "Barrio"]
+
+        return {
+            "network_dir": network_dir,
+            "output_filename": output_filename,
+            "property_options": property_options,
+        }

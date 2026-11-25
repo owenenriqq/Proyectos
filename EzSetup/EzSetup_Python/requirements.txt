@@ -3,3 +3,4 @@ requests>=2.31.0
 pywin32>=306
 pyinstaller>=6.3.0
 cryptography>=42.0.0
+wmi>=1.5.1

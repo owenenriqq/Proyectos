@@ -32,8 +32,10 @@ $PyInstallerArgs = @(
     "--exclude-module", "PyQt6.Qt3DCore"
     "--exclude-module", "PyQt6.QtQml"
     "--exclude-module", "PyQt6.QtQuick"
+    "--hidden-import", "wmi"
     "--add-data", "config.json;."
     "--add-data", "assets;assets"
+    "--add-data", "assets\m365_sanitizer;assets\m365_sanitizer"
 )
 
 $CredentialsEnc = Join-Path $ProjectRoot "credentials.enc"

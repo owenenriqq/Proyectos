@@ -35,6 +35,7 @@ from PyQt6.QtWidgets import (
     QPlainTextEdit,
     QPushButton,
     QScrollArea,
+    QSizePolicy,
     QSplitter,
     QStackedWidget,
     QVBoxLayout,
@@ -43,7 +44,17 @@ from PyQt6.QtWidgets import (
 
 from src import system_tasks
 from src.config import AppConfig, ConfigError
-from src.ui.dialogs import CredentialDialog, PrinterInstallDialog, ProgressDialog
+from src.modules import m365_wrapper, utilities_tasks
+from src.ui.dialogs import (
+    CreateLocalUserDialog,
+    CredentialDialog,
+    HardwareDiagnosticsDialog,
+    InventoryDialog,
+    M365SanitizerDialog,
+    PrinterInstallDialog,
+    ProgressDialog,
+)
+from src.ui.network_view import NetworkManagerView
 from src.workers import (
     DownloadWorker,
     FileCopyWorker,
@@ -97,14 +108,15 @@ class ActionRow(QFrame):
 
         title_lbl = QLabel(title, self)
         title_lbl.setObjectName("RowTitle")
-        layout.addWidget(title_lbl)
+        title_lbl.setWordWrap(True)
+        title_lbl.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        layout.addWidget(title_lbl, stretch=1)
 
         self.badge_label = QLabel(badge_text, self)
         self.badge_label.setObjectName(badge_style)
+        self.badge_label.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         self.badge_label.setVisible(bool(badge_text))
         layout.addWidget(self.badge_label)
-
-        layout.addStretch(1)
 
         for text, obj_name, tooltip, handler in visible_actions:
             btn = QPushButton(text, self)
@@ -158,6 +170,8 @@ class MainWindow(QMainWindow):
         self._search_rows_index: list[tuple[str, ActionRow]] = []
         self._search_empty_label: QLabel | None = None
         self._category_titles: list[str] = []
+        self._network_view: NetworkManagerView | None = None
+        self._network_page_index: int = -1
         self._last_selected_row: int = 0
         self._log_collapsed = True
 
@@ -402,6 +416,11 @@ class MainWindow(QMainWindow):
         self.stack.setUpdatesEnabled(False)
         self.sidebar.blockSignals(True)
         try:
+            if self._network_view is not None:
+                self._network_view.shutdown()
+                self._network_view = None
+            self._network_page_index = -1
+
             self.sidebar.clear()
 
             while self.stack.count():
@@ -442,6 +461,19 @@ class MainWindow(QMainWindow):
                 )
                 self.stack.addWidget(page)
 
+            # Vista dedicada integrada de Gestor de Redes
+            net_item = QListWidgetItem("Redes")
+            net_item.setData(Qt.ItemDataRole.UserRole, "network_manager_view")
+            self.sidebar.addItem(net_item)
+            self._category_titles.append("Redes")
+            self._network_view = NetworkManagerView(
+                log_callback=self.append_log,
+                on_network_changed=self.check_servers_now,
+                parent=self.stack,
+            )
+            self.stack.addWidget(self._network_view)
+            self._network_page_index = self.stack.indexOf(self._network_view)
+
             search_layout.addStretch()
             self.stack.addWidget(self._search_page_scroll)
 
@@ -460,7 +492,9 @@ class MainWindow(QMainWindow):
     def _create_scroll_container(self) -> tuple[QScrollArea, QWidget, QVBoxLayout]:
         scroll = QScrollArea(self.stack)
         scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         container = QWidget(scroll)
+        container.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         layout = QVBoxLayout(container)
         layout.setContentsMargins(18, 10, 18, 14)
         layout.setSpacing(6)
@@ -721,10 +755,23 @@ class MainWindow(QMainWindow):
                 return self._open_credentials_dialog
             if task_name == "open_printer_dialog":
                 return self._open_printer_dialog
+            if task_name == "open_m365_sanitizer_dialog":
+                return self._open_m365_sanitizer_dialog
+            if task_name == "open_create_local_user_dialog":
+                return self._open_create_local_user_dialog
+            if task_name == "open_hardware_diagnostics_dialog":
+                return self._open_hardware_diagnostics_dialog
+            if task_name == "open_inventory_dialog":
+                return self._open_inventory_dialog
+            if task_name == "open_network_manager_view":
+                return self._open_network_manager_view
             if task_name == "refresh_dotnet35_status":
                 return self._refresh_dotnet_badge
 
-            fn = system_tasks.TASK_REGISTRY.get(task_name)
+            fn = (
+                system_tasks.TASK_REGISTRY.get(task_name)
+                or utilities_tasks.UTILITIES_TASK_REGISTRY.get(task_name)
+            )
             if fn is not None:
                 return lambda f=fn, lbl=full_label, cb=on_ok: self._run_task(lbl, f, on_success=cb)
 
@@ -749,6 +796,8 @@ class MainWindow(QMainWindow):
             self.search_input.blockSignals(False)
         self.stack.setCurrentIndex(row)
         self.section_header_label.setText(self._category_titles[row])
+        if row == self._network_page_index and self._network_view is not None:
+            self._network_view.ensure_initialized()
 
     def _on_search_text_edited(self, _text: str) -> None:
         self._search_timer.start()
@@ -1111,10 +1160,81 @@ class MainWindow(QMainWindow):
             lambda cfg, log: system_tasks.install_network_printers(cfg, selected, log),
         )
 
+    def _open_m365_sanitizer_dialog(self) -> None:
+        dialog = M365SanitizerDialog(self)
+        if dialog.exec() != M365SanitizerDialog.DialogCode.Accepted:
+            return
+
+        opts = dialog.get_options()
+        action = opts.get("action", "diagnostics")
+        label = str(opts.get("label", "Sanitizer O365"))
+        what_if = bool(opts.get("what_if", True))
+        license_mode = str(opts.get("license_mode", "Selectivo"))
+
+        if action == "diagnostics":
+            self._run_task(label, m365_wrapper.run_office_diagnostics)
+        elif action == "identity":
+            self._run_task(
+                f"{label} ({'Simulación' if what_if else 'Real'})",
+                lambda cfg, log: m365_wrapper.run_clear_identity_cache(
+                    cfg, what_if=what_if, log=log
+                ),
+            )
+        elif action == "licenses":
+            self._run_task(
+                f"{label} ({'Simulación' if what_if else 'Real'})",
+                lambda cfg, log: m365_wrapper.run_reset_office_licenses(
+                    cfg, mode=license_mode, what_if=what_if, log=log
+                ),
+            )
+        elif action == "uninstall":
+            self._run_task(
+                f"{label} ({'Simulación' if what_if else 'Real'})",
+                lambda cfg, log: m365_wrapper.run_uninstall_office_products(
+                    cfg, what_if=what_if, log=log
+                ),
+            )
+
+    def _open_create_local_user_dialog(self) -> None:
+        dialog = CreateLocalUserDialog(self)
+        if dialog.exec() != CreateLocalUserDialog.DialogCode.Accepted:
+            return
+
+        data = dialog.get_user_data()
+        username = str(data["username"])
+        self._run_task(
+            f"Crear Usuario Local ({username})",
+            lambda cfg, log: utilities_tasks.task_create_local_user(
+                cfg,
+                username=username,
+                password=str(data["password"]),
+                full_name=str(data["full_name"]),
+                add_to_admins=bool(data["add_to_admins"]),
+                log=log,
+            ),
+        )
+
+    def _open_hardware_diagnostics_dialog(self) -> None:
+        dialog = HardwareDiagnosticsDialog(log_callback=self.append_log, parent=self)
+        dialog.exec()
+
+    def _open_inventory_dialog(self) -> None:
+        dialog = InventoryDialog(self.config, log_callback=self.append_log, parent=self)
+        dialog.exec()
+
+    def _open_network_manager_view(self) -> None:
+        if 0 <= self._network_page_index < self.sidebar.count():
+            if self.search_input.text():
+                self.search_input.clear()
+            self.sidebar.setCurrentRow(self._network_page_index)
+            self._on_sidebar_changed(self._network_page_index)
+
     def closeEvent(self, event: QCloseEvent) -> None:
         self._search_timer.stop()
         if hasattr(self, "_server_timer"):
             self._server_timer.stop()
+        if self._network_view is not None:
+            self._network_view.shutdown()
         if self._server_check_worker and self._server_check_worker.isRunning():
             self._server_check_worker.wait(1500)
         if self._install_check_worker and self._install_check_worker.isRunning():

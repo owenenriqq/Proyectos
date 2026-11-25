@@ -56,7 +56,7 @@ QPushButton#AdminBadgeWarnBtn:hover {
     color: #fef3c7;
 }
 
-QLabel[statusRole="serverBadge"] {
+QLabel[statusRole="serverBadge"], QLabel[statusRole="netBadge"] {
     background-color: #1F2228;
     color: #A1A1AA;
     border: 1px solid #272A30;
@@ -173,6 +173,19 @@ QLabel#RowTitle {
     background-color: transparent;
 }
 
+QLabel#RowMeta {
+    font-family: "Consolas", "Cascadia Mono", monospace;
+    font-size: 11px;
+    color: #A1A1AA;
+    background-color: transparent;
+}
+
+QLabel#RowSubtitle {
+    font-size: 11px;
+    color: #71717A;
+    background-color: transparent;
+}
+
 QLabel#RowBadgeOk {
     background-color: #064e3b;
     color: #6ee7b7;
@@ -212,6 +225,10 @@ QPushButton {
     padding: 5px 11px;
     font-size: 12px;
     font-weight: 600;
+}
+
+QPushButton[compact="true"] {
+    padding: 4px 8px;
 }
 
 QPushButton:hover {
@@ -329,7 +346,7 @@ QLabel#LastLogEvent {
     background-color: transparent;
 }
 
-QPlainTextEdit#LogOutput {
+QPlainTextEdit#LogOutput, QPlainTextEdit#DiagnosticOutput {
     background-color: #0A0B0D;
     color: #E4E4E7;
     border: 1px solid #272A30;
@@ -349,7 +366,7 @@ QDialog QLabel {
     color: #F4F4F5;
 }
 
-QLineEdit, QComboBox {
+QLineEdit, QComboBox, QDateEdit, QSpinBox, QPlainTextEdit {
     background-color: #17191D;
     color: #F4F4F5;
     border: 1px solid #272A30;
@@ -357,8 +374,44 @@ QLineEdit, QComboBox {
     padding: 5px 9px;
 }
 
-QLineEdit:focus, QComboBox:focus {
+QLineEdit:focus, QComboBox:focus, QDateEdit:focus, QSpinBox:focus, QPlainTextEdit:focus {
     border-color: #71717A;
+}
+
+QLineEdit:disabled, QComboBox:disabled, QDateEdit:disabled, QSpinBox:disabled {
+    background-color: #131518;
+    color: #52525B;
+    border-color: #202328;
+}
+
+QTabWidget::pane {
+    border: none;
+    border-top: 1px solid #272A30;
+    background-color: #0F1012;
+}
+
+QTabBar::tab {
+    background-color: #17191D;
+    color: #A1A1AA;
+    border: 1px solid #272A30;
+    border-bottom: none;
+    border-top-left-radius: 5px;
+    border-top-right-radius: 5px;
+    padding: 7px 14px;
+    margin-right: 4px;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+QTabBar::tab:hover {
+    background-color: #1F2228;
+    color: #F4F4F5;
+}
+
+QTabBar::tab:selected {
+    background-color: #24272E;
+    color: #F4F4F5;
+    border-color: #3A3F48;
 }
 
 QComboBox QAbstractItemView {
@@ -367,6 +420,53 @@ QComboBox QAbstractItemView {
     border: 1px solid #272A30;
     selection-background-color: #2E323B;
     selection-color: #F4F4F5;
+}
+
+QCalendarWidget {
+    min-width: 300px;
+    min-height: 220px;
+    background-color: #17191D;
+    color: #F4F4F5;
+    border: 1px solid #272A30;
+}
+
+QCalendarWidget QWidget {
+    background-color: #17191D;
+    color: #F4F4F5;
+}
+
+QCalendarWidget QWidget#qt_calendar_navigationbar {
+    background-color: #24272E;
+    min-height: 30px;
+    border-bottom: 1px solid #272A30;
+}
+
+QCalendarWidget QToolButton {
+    color: #F4F4F5;
+    background-color: transparent;
+    font-weight: 600;
+    border: none;
+    padding: 3px 6px;
+}
+
+QCalendarWidget QToolButton:hover {
+    background-color: #2E323B;
+    border-radius: 4px;
+}
+
+QCalendarWidget QAbstractItemView {
+    background-color: #17191D;
+    color: #F4F4F5;
+    selection-background-color: #F4F4F5;
+    selection-color: #111111;
+    outline: 0;
+}
+
+QCalendarWidget QSpinBox {
+    background-color: #17191D;
+    color: #F4F4F5;
+    border: 1px solid #272A30;
+    border-radius: 4px;
 }
 
 QCheckBox, QRadioButton {

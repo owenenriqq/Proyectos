@@ -22,7 +22,7 @@ import win32com.client
 import win32security
 import ntsecuritycon
 
-from src.config import AppConfig
+from src.config import AppConfig, UnauthorizedUNCHostError, validate_unc_host
 
 LogCallback = Callable[[str], None]
 
@@ -30,10 +30,6 @@ _CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
 _REGISTERED_TEMP_DIRS: set[Path] = set()
 _TEMP_LOCK = threading.Lock()
 UAC_PERMISSION_MSG = "Permisos insuficientes. Ejecutá EzSetup como Administrador (clic en 'Sin UAC')."
-
-
-class UnauthorizedUNCHostError(PermissionError):
-    """Error lanzado cuando una ruta UNC apunta a un host no autorizado en config.json."""
 
 
 def format_task_exception(exc: Exception) -> str:
@@ -82,19 +78,6 @@ def cleanup_registered_temp_dirs(log: LogCallback = _noop_log) -> int:
         except OSError:
             pass
     return cleaned
-
-
-def validate_unc_host(path_str: str, allowed_hosts: set[str]) -> None:
-    """Valida que toda ruta UNC pertenezca a un host autorizado en config.json."""
-    normalized = path_str.strip()
-    if not normalized.startswith("\\\\"):
-        return
-    remainder = normalized.lstrip("\\")
-    host = remainder.split("\\", 1)[0].strip().lower()
-    if not host or host not in allowed_hosts:
-        raise UnauthorizedUNCHostError(
-            f"Host UNC no autorizado por config.json: '{host or normalized}'"
-        )
 
 
 def _ensure_unc_exists(

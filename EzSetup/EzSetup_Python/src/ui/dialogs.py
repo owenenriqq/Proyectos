@@ -7,11 +7,13 @@ import os
 from pathlib import Path
 from typing import Any, Callable
 
-from PyQt6.QtCore import QPointF, QSize, Qt, pyqtSignal
-from PyQt6.QtGui import QColor, QIcon, QPainter, QPainterPath, QPen, QPixmap
+from PyQt6.QtCore import QDate, QPointF, QSize, Qt, pyqtSignal
+from PyQt6.QtGui import QCloseEvent, QColor, QIcon, QPainter, QPainterPath, QPen, QPixmap
 from PyQt6.QtWidgets import (
+    QApplication,
     QCheckBox,
     QComboBox,
+    QDateEdit,
     QDialog,
     QFileDialog,
     QFormLayout,
@@ -20,6 +22,7 @@ from PyQt6.QtWidgets import (
     QLabel,
     QLineEdit,
     QMessageBox,
+    QPlainTextEdit,
     QProgressBar,
     QPushButton,
     QRadioButton,
@@ -36,6 +39,19 @@ from src.crypto_store import (
     CredentialIOError,
     load_encrypted_credentials,
 )
+from src.modules.inventory.inventory_tasks import (
+    collect_hardware_info,
+    export_inventory_record_local,
+    format_hardware_preview,
+    format_inventory_record,
+    save_inventory_record,
+)
+from src.modules.utilities.diagnostics import (
+    export_diagnostic_report,
+    get_battery_report_path,
+    run_full_diagnostics,
+)
+from src.workers import TaskWorker
 
 
 def _create_eye_icon(crossed: bool = False) -> QIcon:
@@ -649,3 +665,731 @@ class PrinterInstallDialog(QDialog):
 
     def get_selected_printers(self) -> list[dict[str, str]]:
         return list(self._selected_printers)
+
+
+class M365SanitizerDialog(QDialog):
+    """Diálogo selector para ejecutar acciones no interactivas de Suite-M365-Saneamiento."""
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("Suite-M365-Saneamiento")
+        self.setMinimumWidth(520)
+        self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
+        self.setModal(True)
+
+        self._selected_options: dict[str, Any] = {}
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(20, 18, 20, 18)
+        root.setSpacing(12)
+
+        header = QLabel("Saneamiento de Microsoft 365 y Office")
+        header.setObjectName("SectionTitle")
+        root.addWidget(header)
+
+        subtitle = QLabel(
+            "Seleccioná la operación a ejecutar. Se prioriza el modo simulación (-WhatIf) "
+            "para validar el impacto antes de aplicar cambios reales."
+        )
+        subtitle.setObjectName("MutedText")
+        subtitle.setWordWrap(True)
+        root.addWidget(subtitle)
+
+        card = QFrame()
+        card.setObjectName("SectionCard")
+        card_layout = QVBoxLayout(card)
+        card_layout.setContentsMargins(14, 12, 14, 12)
+        card_layout.setSpacing(10)
+
+        self.rb_diagnostics = QRadioButton(
+            "1. Diagnóstico de Office y Licencias (solo lectura)"
+        )
+        self.rb_diagnostics.setChecked(True)
+        card_layout.addWidget(self.rb_diagnostics)
+
+        self.rb_identity = QRadioButton(
+            "2. Limpiar caché de identidad (WAM, OneAuth, IdentityCache, cmdkey)"
+        )
+        card_layout.addWidget(self.rb_identity)
+
+        self.rb_licenses = QRadioButton(
+            "3. Restablecer licencias y sppc.dll (Ohook / vNext)"
+        )
+        card_layout.addWidget(self.rb_licenses)
+
+        lic_mode_row = QHBoxLayout()
+        lic_mode_row.setContentsMargins(24, 0, 0, 0)
+        lic_mode_row.setSpacing(8)
+        self.lic_mode_label = QLabel("Modo de licencias:")
+        self.lic_mode_label.setObjectName("MutedText")
+        self.lic_mode_combo = QComboBox()
+        self.lic_mode_combo.addItem("Selectivo (conserva Project / Visio)", "Selectivo")
+        self.lic_mode_combo.addItem("Total (elimina todas las claves)", "Total")
+        lic_mode_row.addWidget(self.lic_mode_label)
+        lic_mode_row.addWidget(self.lic_mode_combo, 1)
+        card_layout.addLayout(lic_mode_row)
+
+        self.rb_uninstall = QRadioButton(
+            "4. Desinstalación total y limpieza profunda de Office"
+        )
+        card_layout.addWidget(self.rb_uninstall)
+
+        root.addWidget(card)
+
+        self.whatif_chk = QCheckBox(
+            "Ejecutar en modo simulación (-WhatIf, no realiza cambios reales)"
+        )
+        self.whatif_chk.setChecked(True)
+        root.addWidget(self.whatif_chk)
+
+        btn_row = QHBoxLayout()
+        btn_row.addStretch(1)
+
+        self.cancel_btn = QPushButton("Cancelar")
+        self.cancel_btn.clicked.connect(self.reject)
+        btn_row.addWidget(self.cancel_btn)
+
+        self.run_btn = QPushButton("Ejecutar")
+        self.run_btn.setObjectName("PrimaryButton")
+        self.run_btn.clicked.connect(self._on_accept)
+        btn_row.addWidget(self.run_btn)
+        root.addLayout(btn_row)
+
+        for rb in (
+            self.rb_diagnostics,
+            self.rb_identity,
+            self.rb_licenses,
+            self.rb_uninstall,
+        ):
+            rb.toggled.connect(self._update_controls_state)
+        self._update_controls_state()
+
+    def _update_controls_state(self) -> None:
+        is_diag = self.rb_diagnostics.isChecked()
+        is_lic = self.rb_licenses.isChecked()
+        self.lic_mode_label.setEnabled(is_lic)
+        self.lic_mode_combo.setEnabled(is_lic)
+        self.whatif_chk.setEnabled(not is_diag)
+
+    def _on_accept(self) -> None:
+        what_if = self.whatif_chk.isChecked()
+        if self.rb_diagnostics.isChecked():
+            action = "diagnostics"
+            label = "Diagnóstico M365 (solo lectura)"
+            what_if = True
+        elif self.rb_identity.isChecked():
+            action = "identity"
+            label = "Limpieza de Caché de Identidad M365"
+        elif self.rb_licenses.isChecked():
+            action = "licenses"
+            label = f"Restablecer Licencias Office ({self.lic_mode_combo.currentData()})"
+        else:
+            action = "uninstall"
+            label = "Desinstalación y Limpieza Profunda Office"
+
+        if action != "diagnostics" and not what_if:
+            warning_text = (
+                f"Vas a ejecutar '{label}' en MODO REAL.\n\n"
+                "Esta operación modificará cachés, credenciales o productos de Microsoft Office en el equipo.\n"
+                "¿Confirmás que deseás continuar?"
+            )
+            if action == "uninstall":
+                warning_text = (
+                    "ADVERTENCIA CRÍTICA: Vas a desinstalar TODOS los productos de Office/Project/Visio "
+                    "detectados y ejecutar limpieza profunda en MODO REAL.\n\n"
+                    "¿Confirmás continuar?"
+                )
+            reply = QMessageBox.question(
+                self,
+                "Confirmar ejecución real",
+                warning_text,
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if reply != QMessageBox.StandardButton.Yes:
+                return
+
+        self._selected_options = {
+            "action": action,
+            "label": label,
+            "license_mode": str(self.lic_mode_combo.currentData() or "Selectivo"),
+            "what_if": what_if,
+        }
+        self.accept()
+
+    def get_options(self) -> dict[str, Any]:
+        """Devuelve la acción y parámetros seleccionados por el operador."""
+        return dict(self._selected_options)
+
+
+class CreateLocalUserDialog(QDialog):
+    """Diálogo modal para crear una cuenta de usuario local en Windows."""
+
+    _FORBIDDEN_CHARS = ('"', "'", "\\", "/", ":", ";", "|", "=", ",", "+", "*", "?", "<", ">")
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("Crear Usuario Local (Windows)")
+        self.setMinimumWidth(480)
+        self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
+        self.setModal(True)
+
+        self._user_data: dict[str, Any] = {}
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(20, 18, 20, 18)
+        root.setSpacing(12)
+
+        header = QLabel("Nueva cuenta local de Windows")
+        header.setObjectName("PageHeader")
+        root.addWidget(header)
+
+        card = QFrame()
+        card.setObjectName("ActionRow")
+        card_layout = QVBoxLayout(card)
+        card_layout.setContentsMargins(14, 12, 14, 12)
+        card_layout.setSpacing(10)
+
+        form = QFormLayout()
+        form.setSpacing(8)
+
+        self.username_edit = QLineEdit()
+        self.username_edit.setPlaceholderText("Ej: Soporte")
+
+        pwd_row = QHBoxLayout()
+        pwd_row.setSpacing(6)
+        self.password_edit = QLineEdit()
+        self.password_edit.setEchoMode(QLineEdit.EchoMode.Password)
+        self.password_edit.setPlaceholderText("Ingresá una contraseña")
+
+        self.toggle_pwd_btn = QPushButton("", self)
+        self.toggle_pwd_btn.setObjectName("EyeButton")
+        self.toggle_pwd_btn.setCheckable(True)
+        self.toggle_pwd_btn.setFixedSize(32, 30)
+        self.toggle_pwd_btn.setIcon(_create_eye_icon(False))
+        self.toggle_pwd_btn.setIconSize(QSize(18, 18))
+        self.toggle_pwd_btn.setToolTip("Mostrar contraseña")
+        self.toggle_pwd_btn.toggled.connect(self._on_toggle_password)
+
+        pwd_row.addWidget(self.password_edit)
+        pwd_row.addWidget(self.toggle_pwd_btn)
+
+        self.fullname_edit = QLineEdit()
+        self.fullname_edit.setPlaceholderText("Opcional")
+
+        form.addRow("Usuario:", self.username_edit)
+        form.addRow("Contraseña:", pwd_row)
+        form.addRow("Nombre completo:", self.fullname_edit)
+        card_layout.addLayout(form)
+
+        self.admin_chk = QCheckBox("Agregar al grupo Administradores (SID S-1-5-32-544)")
+        card_layout.addWidget(self.admin_chk)
+
+        root.addWidget(card)
+
+        btn_row = QHBoxLayout()
+        btn_row.addStretch(1)
+
+        self.cancel_btn = QPushButton("Cancelar")
+        self.cancel_btn.clicked.connect(self.reject)
+        btn_row.addWidget(self.cancel_btn)
+
+        self.create_btn = QPushButton("Crear Usuario")
+        self.create_btn.setObjectName("PrimaryButton")
+        self.create_btn.clicked.connect(self._on_accept)
+        btn_row.addWidget(self.create_btn)
+        root.addLayout(btn_row)
+
+    def _on_toggle_password(self, checked: bool) -> None:
+        self.password_edit.setEchoMode(
+            QLineEdit.EchoMode.Normal if checked else QLineEdit.EchoMode.Password
+        )
+        self.toggle_pwd_btn.setIcon(_create_eye_icon(checked))
+        self.toggle_pwd_btn.setToolTip("Ocultar contraseña" if checked else "Mostrar contraseña")
+
+    def _on_accept(self) -> None:
+        username = self.username_edit.text().strip()
+        password = self.password_edit.text()
+        full_name = self.fullname_edit.text().strip()
+
+        if not username:
+            QMessageBox.warning(self, "Usuario requerido", "Ingresá un nombre de usuario.")
+            return
+        if any(ch in username for ch in self._FORBIDDEN_CHARS):
+            QMessageBox.warning(
+                self,
+                "Nombre inválido",
+                "El nombre de usuario contiene caracteres no permitidos en Windows.",
+            )
+            return
+        if not password:
+            QMessageBox.warning(self, "Contraseña requerida", "Ingresá una contraseña.")
+            return
+
+        self._user_data = {
+            "username": username,
+            "password": password,
+            "full_name": full_name,
+            "add_to_admins": self.admin_chk.isChecked(),
+        }
+        self.accept()
+
+    def get_user_data(self) -> dict[str, Any]:
+        """Devuelve los datos validados del usuario a crear."""
+        return dict(self._user_data)
+
+
+class HardwareDiagnosticsDialog(QDialog):
+    """Diálogo modal de diagnóstico de hardware, S.M.A.R.T., batería y estabilidad BSOD."""
+
+    def __init__(
+        self,
+        log_callback: Callable[[str], None] | None = None,
+        parent: QWidget | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("Diagnóstico de Hardware y Estabilidad")
+        self.setMinimumSize(680, 560)
+        self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
+        self.setModal(True)
+
+        self._log_callback = log_callback
+        self._worker: TaskWorker | None = None
+        self._diag_results: dict[str, str] = {}
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(20, 18, 20, 18)
+        root.setSpacing(10)
+
+        header = QLabel("Diagnóstico de Hardware y Estabilidad")
+        header.setObjectName("PageHeader")
+        root.addWidget(header)
+
+        placeholder = "Sin datos. Hacé clic en 'Ejecutar Diagnóstico' para consultar."
+
+        self.smart_output = self._add_section(root, "DISCOS FÍSICOS (S.M.A.R.T. — SIN USB)", placeholder, 95)
+        self.partitions_output = self._add_section(root, "PARTICIONES FIJAS (DRIVETYPE = 3)", placeholder, 85)
+        self.battery_output = self._add_section(root, "SALUD DE BATERÍA (%TEMP%\\battery.html)", placeholder, 65)
+        self.stability_output = self._add_section(root, "ESTABILIDAD, RAM, UPTIME Y BSOD (30 DÍAS)", placeholder, 105)
+
+        btn_row = QHBoxLayout()
+        btn_row.setSpacing(8)
+
+        self.run_btn = QPushButton("Ejecutar Diagnóstico")
+        self.run_btn.setObjectName("PrimaryButton")
+        self.run_btn.clicked.connect(self._start_diagnostics)
+        btn_row.addWidget(self.run_btn)
+
+        self.open_battery_btn = QPushButton("Abrir Batería HTML")
+        self.open_battery_btn.setEnabled(get_battery_report_path().is_file())
+        self.open_battery_btn.clicked.connect(self._open_battery_html)
+        btn_row.addWidget(self.open_battery_btn)
+
+        self.export_btn = QPushButton("Exportar (.txt)")
+        self.export_btn.setEnabled(False)
+        self.export_btn.clicked.connect(self._export_report)
+        btn_row.addWidget(self.export_btn)
+
+        btn_row.addStretch(1)
+
+        self.close_btn = QPushButton("Cerrar")
+        self.close_btn.clicked.connect(self.close)
+        btn_row.addWidget(self.close_btn)
+        root.addLayout(btn_row)
+
+    @staticmethod
+    def _add_section(
+        parent_layout: QVBoxLayout,
+        title: str,
+        initial_text: str,
+        min_height: int,
+    ) -> QPlainTextEdit:
+        lbl = QLabel(title)
+        lbl.setObjectName("SubgroupTitle")
+        parent_layout.addWidget(lbl)
+
+        box = QPlainTextEdit()
+        box.setObjectName("LogOutput")
+        box.setReadOnly(True)
+        box.setMinimumHeight(min_height)
+        box.setMaximumHeight(min_height + 25)
+        box.setPlainText(initial_text)
+        parent_layout.addWidget(box)
+        return box
+
+    def _emit_log(self, line: str) -> None:
+        if callable(self._log_callback):
+            self._log_callback(line)
+
+    def _start_diagnostics(self) -> None:
+        if self._worker and self._worker.isRunning():
+            return
+
+        self.run_btn.setEnabled(False)
+        self.export_btn.setEnabled(False)
+        self.open_battery_btn.setEnabled(False)
+        self.run_btn.setText("Consultando...")
+
+        captured: dict[str, str] = {}
+
+        def _task(log: Callable[[str], None]) -> str:
+            all_ok, results = run_full_diagnostics(log_cb=log)
+            captured.update(results)
+            return "Diagnóstico de hardware completado." if all_ok else "Diagnóstico completado con advertencias."
+
+        worker = TaskWorker(_task)
+        worker.log_message.connect(self._emit_log)
+        worker.finished_success.connect(lambda msg: self._on_diag_finished(captured, msg))
+        worker.failed.connect(self._on_diag_failed)
+        self._worker = worker
+        worker.start()
+
+    def _on_diag_finished(self, results: dict[str, str], _msg: str) -> None:
+        self._diag_results = dict(results)
+        self.smart_output.setPlainText(results.get("smart", "Sin datos."))
+        self.partitions_output.setPlainText(results.get("partitions", "Sin datos."))
+        self.battery_output.setPlainText(results.get("battery", "Sin datos."))
+        self.stability_output.setPlainText(results.get("stability", "Sin datos."))
+
+        self.run_btn.setText("Ejecutar Diagnóstico")
+        self.run_btn.setEnabled(True)
+        self.export_btn.setEnabled(bool(self._diag_results))
+        self.open_battery_btn.setEnabled(get_battery_report_path().is_file())
+
+    def _on_diag_failed(self, err: str) -> None:
+        self.run_btn.setText("Ejecutar Diagnóstico")
+        self.run_btn.setEnabled(True)
+        self.open_battery_btn.setEnabled(get_battery_report_path().is_file())
+        QMessageBox.warning(self, "Error en diagnóstico", err)
+
+    def _open_battery_html(self) -> None:
+        report_path = get_battery_report_path()
+        if not report_path.is_file():
+            QMessageBox.information(
+                self,
+                "Reporte no disponible",
+                f"No se encontró el archivo {report_path}.",
+            )
+            return
+        if os.name == "nt":
+            os.startfile(str(report_path))
+
+    def _export_report(self) -> None:
+        if not self._diag_results:
+            return
+        default_name = f"diagnostico_{os.environ.get('COMPUTERNAME', 'equipo')}.txt"
+        target_path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Exportar Reporte de Diagnóstico",
+            default_name,
+            "Archivos de texto (*.txt)",
+        )
+        if not target_path:
+            return
+        ok, msg = export_diagnostic_report(target_path, self._diag_results)
+        if ok:
+            self._emit_log(f"[OK] {msg}")
+            QMessageBox.information(self, "Reporte exportado", msg)
+        else:
+            self._emit_log(f"[ERROR] {msg}")
+            QMessageBox.warning(self, "Error al exportar", msg)
+
+    def closeEvent(self, event: QCloseEvent) -> None:
+        if self._worker and self._worker.isRunning():
+            self._worker.wait(1500)
+        super().closeEvent(event)
+
+
+class InventoryDialog(QDialog):
+    """Diálogo modal de relevamiento de inventario de hardware y datos administrativos."""
+
+    def __init__(
+        self,
+        config: AppConfig,
+        log_callback: Callable[[str], None] | None = None,
+        parent: QWidget | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self.config = config
+        self._log_callback = log_callback
+        self._worker: TaskWorker | None = None
+        self._hw_snapshot: dict[str, str] | None = None
+
+        self.setWindowTitle("Inventario de Equipo — Eidico")
+        self.setMinimumSize(700, 620)
+        self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
+        self.setModal(True)
+
+        inv_cfg = config.get_inventory_config()
+        dest_preview = str(Path(inv_cfg["network_dir"]) / inv_cfg["output_filename"])
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(20, 18, 20, 18)
+        root.setSpacing(10)
+
+        header = QLabel("Inventario de Equipo y Usuario")
+        header.setObjectName("PageHeader")
+        root.addWidget(header)
+
+        form_card = QFrame()
+        form_card.setObjectName("ActionRow")
+        form_layout = QFormLayout(form_card)
+        form_layout.setContentsMargins(14, 12, 14, 12)
+        form_layout.setSpacing(8)
+
+        self.ad_edit = QLineEdit()
+        self.ad_edit.setPlaceholderText("Ej: jperez")
+
+        self.correo_edit = QLineEdit()
+        self.correo_edit.setPlaceholderText("usuario@eidico.com.ar")
+
+        self.puesto_edit = QLineEdit()
+
+        self.antiguedad_edit = QDateEdit()
+        self.antiguedad_edit.setCalendarPopup(True)
+        self.antiguedad_edit.setDisplayFormat("dd/MM/yyyy")
+        self.antiguedad_edit.setDate(QDate.currentDate())
+
+        self.area_edit = QLineEdit()
+
+        self.propiedad_combo = QComboBox()
+        self.propiedad_combo.addItems(inv_cfg["property_options"])
+        self.propiedad_combo.currentTextChanged.connect(self._on_property_changed)
+
+        self.barrio_edit = QLineEdit()
+        self.barrio_edit.setPlaceholderText("Nombre del Barrio...")
+        self.barrio_edit.setVisible(False)
+
+        self.compra_edit = QDateEdit()
+        self.compra_edit.setCalendarPopup(True)
+        self.compra_edit.setDisplayFormat("dd/MM/yyyy")
+        self.compra_edit.setDate(QDate.currentDate())
+
+        self.obs_edit = QPlainTextEdit()
+        self.obs_edit.setFixedHeight(56)
+        self.obs_edit.setPlaceholderText("Observaciones opcionales...")
+
+        form_layout.addRow("Usuario AD:", self.ad_edit)
+        form_layout.addRow("Correo electrónico:", self.correo_edit)
+        form_layout.addRow("Puesto:", self.puesto_edit)
+        form_layout.addRow("Antigüedad:", self.antiguedad_edit)
+        form_layout.addRow("Departamento / Área:", self.area_edit)
+        form_layout.addRow("Propiedad de:", self.propiedad_combo)
+        form_layout.addRow("Barrio:", self.barrio_edit)
+        form_layout.addRow("Fecha de compra:", self.compra_edit)
+        form_layout.addRow("Observaciones:", self.obs_edit)
+        root.addWidget(form_card)
+
+        hw_lbl = QLabel("HARDWARE RELEVADO (WMI / POWERSHELL)")
+        hw_lbl.setObjectName("SubgroupTitle")
+        root.addWidget(hw_lbl)
+
+        self.hw_preview = QPlainTextEdit()
+        self.hw_preview.setObjectName("LogOutput")
+        self.hw_preview.setReadOnly(True)
+        self.hw_preview.setFixedHeight(105)
+        self.hw_preview.setPlainText(
+            "Sin relevar. Hacé clic en 'Relevar Hardware' o directamente en 'Guardar en Red'."
+        )
+        root.addWidget(self.hw_preview)
+
+        dest_lbl = QLabel(f"Destino configurado: {dest_preview}")
+        dest_lbl.setObjectName("LastLogEvent")
+        root.addWidget(dest_lbl)
+
+        btn_row = QHBoxLayout()
+        btn_row.setSpacing(8)
+
+        self.refresh_hw_btn = QPushButton("Relevar Hardware")
+        self.refresh_hw_btn.clicked.connect(self._start_hardware_scan)
+        btn_row.addWidget(self.refresh_hw_btn)
+
+        self.copy_btn = QPushButton("Copiar")
+        self.copy_btn.clicked.connect(self._copy_record)
+        btn_row.addWidget(self.copy_btn)
+
+        self.export_btn = QPushButton("Exportar (.txt)")
+        self.export_btn.clicked.connect(self._export_local)
+        btn_row.addWidget(self.export_btn)
+
+        btn_row.addStretch(1)
+
+        self.close_btn = QPushButton("Cerrar")
+        self.close_btn.clicked.connect(self.close)
+        btn_row.addWidget(self.close_btn)
+
+        self.save_btn = QPushButton("Guardar en Red")
+        self.save_btn.setObjectName("PrimaryButton")
+        self.save_btn.clicked.connect(self._start_save_network)
+        btn_row.addWidget(self.save_btn)
+
+        root.addLayout(btn_row)
+        self._on_property_changed(self.propiedad_combo.currentText())
+
+    def _emit_log(self, line: str) -> None:
+        if callable(self._log_callback):
+            self._log_callback(line)
+
+    def _on_property_changed(self, value: str) -> None:
+        is_barrio = value == "Barrio"
+        self.barrio_edit.setVisible(is_barrio)
+        if not is_barrio:
+            self.barrio_edit.clear()
+
+    def _set_busy(self, busy: bool, action_text: str = "") -> None:
+        for btn in (self.refresh_hw_btn, self.copy_btn, self.export_btn, self.save_btn):
+            btn.setEnabled(not busy)
+        if busy and action_text:
+            self.save_btn.setText(action_text)
+        else:
+            self.save_btn.setText("Guardar en Red")
+
+    def _collect_admin_data(self, require_ad: bool = True) -> dict[str, str] | None:
+        ad_user = self.ad_edit.text().strip()
+        prop_sel = self.propiedad_combo.currentText().strip()
+        barrio = self.barrio_edit.text().strip()
+
+        errors: list[str] = []
+        if require_ad and not ad_user:
+            errors.append("Ingresá el Usuario AD.")
+        if prop_sel == "Barrio" and not barrio:
+            errors.append("Especificá el nombre del Barrio.")
+
+        if errors:
+            QMessageBox.warning(self, "Datos incompletos", "\n".join(errors))
+            return None
+
+        propiedad_final = f"Barrio ({barrio})" if prop_sel == "Barrio" else prop_sel
+        return {
+            "ad": ad_user,
+            "correo": self.correo_edit.text().strip(),
+            "puesto": self.puesto_edit.text().strip(),
+            "antiguedad": self.antiguedad_edit.date().toString("dd/MM/yyyy"),
+            "area": self.area_edit.text().strip(),
+            "propiedad": propiedad_final,
+            "compra": self.compra_edit.date().toString("dd/MM/yyyy"),
+            "obs": self.obs_edit.toPlainText(),
+        }
+
+    def _start_hardware_scan(self) -> None:
+        if self._worker and self._worker.isRunning():
+            return
+
+        self._set_busy(True, "Relevando...")
+        captured: dict[str, str] = {}
+
+        def _task(log: Callable[[str], None]) -> str:
+            hw = collect_hardware_info(log=log)
+            captured.update(hw)
+            return "Hardware relevado correctamente."
+
+        worker = TaskWorker(_task)
+        worker.log_message.connect(self._emit_log)
+        worker.finished_success.connect(lambda _m: self._on_hw_scan_done(captured))
+        worker.failed.connect(self._on_worker_error)
+        self._worker = worker
+        worker.start()
+
+    def _on_hw_scan_done(self, hw: dict[str, str]) -> None:
+        self._hw_snapshot = dict(hw)
+        self.hw_preview.setPlainText(format_hardware_preview(hw))
+        self._set_busy(False)
+
+    def _copy_record(self) -> None:
+        admin_data = self._collect_admin_data(require_ad=True)
+        if admin_data is None:
+            return
+        if self._hw_snapshot is None:
+            QMessageBox.information(
+                self,
+                "Hardware pendiente",
+                "Hacé clic primero en 'Relevar Hardware' para incluir los datos del equipo.",
+            )
+            return
+
+        record = format_inventory_record(admin_data, self._hw_snapshot)
+        clipboard = QApplication.clipboard()
+        if clipboard is not None:
+            clipboard.setText(record)
+        self._emit_log("[OK] Registro de inventario copiado al portapapeles.")
+        QMessageBox.information(
+            self,
+            "Copiado",
+            "Registro de inventario copiado al portapapeles.",
+        )
+
+    def _export_local(self) -> None:
+        admin_data = self._collect_admin_data(require_ad=True)
+        if admin_data is None:
+            return
+        if self._hw_snapshot is None:
+            QMessageBox.information(
+                self,
+                "Hardware pendiente",
+                "Hacé clic primero en 'Relevar Hardware' para exportar el registro completo.",
+            )
+            return
+
+        hostname = self._hw_snapshot.get("hostname", "equipo")
+        target, _ = QFileDialog.getSaveFileName(
+            self,
+            "Exportar Registro de Inventario",
+            f"Inventario_{hostname}.txt",
+            "Archivos de texto (*.txt)",
+        )
+        if not target:
+            return
+        try:
+            msg = export_inventory_record_local(Path(target), admin_data, self._hw_snapshot)
+            self._emit_log(f"[OK] {msg}")
+            QMessageBox.information(self, "Exportado", msg)
+        except OSError as exc:
+            self._emit_log(f"[ERROR] No se pudo exportar inventario: {exc}")
+            QMessageBox.warning(self, "Error al exportar", str(exc))
+
+    def _start_save_network(self) -> None:
+        if self._worker and self._worker.isRunning():
+            return
+        admin_data = self._collect_admin_data(require_ad=True)
+        if admin_data is None:
+            return
+
+        self._set_busy(True, "Guardando...")
+        captured_hw: dict[str, str] = {}
+
+        def _task(log: Callable[[str], None]) -> str:
+            hw = self._hw_snapshot if self._hw_snapshot is not None else collect_hardware_info(log=log)
+            captured_hw.update(hw)
+            return save_inventory_record(self.config, admin_data, hw=hw, log=log)
+
+        worker = TaskWorker(_task)
+        worker.log_message.connect(self._emit_log)
+        worker.finished_success.connect(lambda msg: self._on_save_done(captured_hw, msg))
+        worker.failed.connect(self._on_worker_error)
+        self._worker = worker
+        worker.start()
+
+    def _on_save_done(self, hw: dict[str, str], msg: str) -> None:
+        if hw:
+            self._hw_snapshot = dict(hw)
+            self.hw_preview.setPlainText(format_hardware_preview(hw))
+        self._set_busy(False)
+        QMessageBox.information(self, "Inventario guardado", msg)
+
+        self.correo_edit.clear()
+        self.puesto_edit.clear()
+        self.area_edit.clear()
+        self.barrio_edit.clear()
+        self.obs_edit.clear()
+        self.propiedad_combo.setCurrentIndex(0)
+        self.antiguedad_edit.setDate(QDate.currentDate())
+        self.compra_edit.setDate(QDate.currentDate())
+
+    def _on_worker_error(self, err: str) -> None:
+        self._set_busy(False)
+        QMessageBox.warning(self, "Error en inventario", err)
+
+    def closeEvent(self, event: QCloseEvent) -> None:
+        if self._worker and self._worker.isRunning():
+            self._worker.wait(1500)
+        super().closeEvent(event)

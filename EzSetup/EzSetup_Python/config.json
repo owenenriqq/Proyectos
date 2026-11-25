@@ -62,7 +62,21 @@
     "services_root": "SYSTEM\\CurrentControlSet\\Services"
   },
   "security": {
-    "users_group_sid": "S-1-5-32-545"
+    "users_group_sid": "S-1-5-32-545",
+    "extra_allowed_unc_hosts": [
+      "fileserver2025"
+    ]
+  },
+  "inventory": {
+    "network_dir": "\\\\fileserver2025\\IT\\SOFT-INVENTARIO",
+    "output_filename": "Inventario.txt",
+    "property_options": [
+      "EIDICO",
+      "Urbis",
+      "Órbita",
+      "Personal",
+      "Barrio"
+    ]
   },
   "urls": {
     "forticlient_zip": {
@@ -444,6 +458,19 @@
                   "tooltip": "Crear accesos directos .lnk a 172.30.0.13 y 172.31.11.146 sin pedir contraseñas"
                 }
               ]
+            },
+            {
+              "id": "eidico_inventory",
+              "title": "Inventario de Equipo",
+              "actions": [
+                {
+                  "label": "Abrir",
+                  "style": "PrimaryButton",
+                  "type": "task",
+                  "task": "open_inventory_dialog",
+                  "tooltip": "Relevar hardware/SO vía WMI y registrar datos administrativos en Inventario.txt"
+                }
+              ]
             }
           ]
         },
@@ -658,26 +685,85 @@
       "title": "Reparaciones y Diagnóstico",
       "subgroups": [
         {
-          "title": "Sistema, Discos y Energía",
+          "title": "REPARACIÓN DE SISTEMA",
           "items": [
             {
-              "id": "dotnet_35",
-              "title": ".NET Framework 3.5",
-              "status_source": "dotnet35",
+              "id": "util_dism",
+              "title": "Integridad de Imagen (DISM)",
               "actions": [
                 {
-                  "label": "Verificar",
+                  "label": "ScanHealth",
                   "style": "",
                   "type": "task",
-                  "task": "refresh_dotnet35_status",
-                  "tooltip": "Consultar estado en HKLM\\SOFTWARE\\Microsoft\\NET Framework Setup\\NDP\\v3.5"
+                  "task": "util_dism_scan",
+                  "tooltip": "Analizar integridad del almacén de componentes (DISM /ScanHealth)"
                 },
                 {
-                  "label": "Habilitar",
+                  "label": "RestoreHealth",
+                  "style": "",
+                  "type": "task",
+                  "task": "util_dism_restore",
+                  "confirm": "¿Ejecutar DISM /RestoreHealth /NoRestart?\n\nEsta operación puede demorar varios minutos.",
+                  "tooltip": "Reparar imagen de Windows (DISM /RestoreHealth /NoRestart)"
+                },
+                {
+                  "label": "ComponentCleanup",
                   "style": "PrimaryButton",
                   "type": "task",
-                  "task": "open_optional_features",
-                  "tooltip": "Abrir Características de Windows (optionalfeatures.exe)"
+                  "task": "util_dism_cleanup",
+                  "tooltip": "Limpiar componentes obsoletos (DISM /StartComponentCleanup)"
+                }
+              ]
+            },
+            {
+              "id": "util_sfc",
+              "title": "Archivos de Sistema (SFC)",
+              "actions": [
+                {
+                  "label": "SFC /scannow",
+                  "style": "PrimaryButton",
+                  "type": "task",
+                  "task": "util_sfc_scannow",
+                  "tooltip": "Verificar y reparar archivos protegidos del sistema (sfc /scannow)"
+                }
+              ]
+            },
+            {
+              "id": "util_full_repair",
+              "title": "Reparación Completa Automática",
+              "actions": [
+                {
+                  "label": "Ejecutar",
+                  "style": "PrimaryButton",
+                  "type": "task",
+                  "task": "util_full_repair",
+                  "confirm": "¿Iniciar Reparación Completa Automática?\n\nEjecutará en secuencia: DISM /ScanHealth -> /RestoreHealth (si aplica) -> sfc /scannow -> /StartComponentCleanup.\nPuede demorar varios minutos.",
+                  "tooltip": "Secuencia guiada: ScanHealth -> RestoreHealth -> SFC /scannow -> StartComponentCleanup"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "title": "DIAGNÓSTICO Y HARDWARE",
+          "items": [
+            {
+              "id": "util_hw_diagnostics",
+              "title": "Diagnóstico de Hardware y Estabilidad",
+              "actions": [
+                {
+                  "label": "Batería HTML",
+                  "style": "",
+                  "type": "task",
+                  "task": "generate_battery_report",
+                  "tooltip": "Ejecutar powercfg /batteryreport y abrir informe en el navegador"
+                },
+                {
+                  "label": "Panel Completo",
+                  "style": "PrimaryButton",
+                  "type": "task",
+                  "task": "open_hardware_diagnostics_dialog",
+                  "tooltip": "Consultar S.M.A.R.T. (sin USB), particiones fijas, batería, RAM/Uptime y BSOD"
                 }
               ]
             },
@@ -705,17 +791,163 @@
                   "path": "\\\\172.30.0.13\\it\\SOFTWARE\\Hard Disk Sentinel Pro 5.50 Build 10482 + Crack\\hdsentinel_pro_setup.exe"
                 }
               ]
-            },
+            }
+          ]
+        },
+        {
+          "title": "ENERGÍA Y CUENTAS",
+          "items": [
             {
-              "id": "battery_report",
-              "title": "Reporte de Salud de Batería",
+              "id": "util_hibernation",
+              "title": "Hibernación e Inicio Rápido",
               "actions": [
                 {
-                  "label": "Generar",
+                  "label": "Ver Estado",
+                  "style": "",
+                  "type": "task",
+                  "task": "util_hibernation_status",
+                  "tooltip": "Consultar hiberfil.sys y valor HiberbootEnabled en el Registro"
+                },
+                {
+                  "label": "Activar",
+                  "style": "",
+                  "type": "task",
+                  "task": "util_hibernation_on",
+                  "tooltip": "Activar hibernación (powercfg -h on)"
+                },
+                {
+                  "label": "Desactivar",
                   "style": "PrimaryButton",
                   "type": "task",
-                  "task": "generate_battery_report",
-                  "tooltip": "Ejecutar powercfg /batteryreport y abrir informe en el navegador"
+                  "task": "util_hibernation_off",
+                  "tooltip": "Desactivar hibernación e Inicio Rápido (powercfg -h off y HiberbootEnabled = 0)"
+                },
+                {
+                  "label": "Activar + Inicio Rápido",
+                  "style": "",
+                  "type": "task",
+                  "task": "util_hibernation_on_fastboot",
+                  "tooltip": "Activar hibernación y habilitar Inicio Rápido (HiberbootEnabled = 1)"
+                }
+              ]
+            },
+            {
+              "id": "util_local_user",
+              "title": "Cuentas Locales de Windows",
+              "actions": [
+                {
+                  "label": "Crear Usuario",
+                  "style": "PrimaryButton",
+                  "type": "task",
+                  "task": "open_create_local_user_dialog",
+                  "tooltip": "Crear usuario local con opción de agregarlo al grupo Administradores (SID S-1-5-32-544)"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "title": "SHELL Y MANTENIMIENTO",
+          "items": [
+            {
+              "id": "util_icon_cache",
+              "title": "Caché de Iconos y Registro",
+              "actions": [
+                {
+                  "label": "Ver Max Icons",
+                  "style": "",
+                  "type": "task",
+                  "task": "util_get_max_icons",
+                  "tooltip": "Consultar Max Cached Icons en HKLM"
+                },
+                {
+                  "label": "Fijar 4096",
+                  "style": "",
+                  "type": "task",
+                  "task": "util_set_max_icons",
+                  "tooltip": "Establecer Max Cached Icons = 4096 (REG_SZ)"
+                },
+                {
+                  "label": "Reconstruir Caché",
+                  "style": "PrimaryButton",
+                  "type": "task",
+                  "task": "util_rebuild_icon_cache",
+                  "confirm": "¿Reconstruir la caché de iconos?\n\nSe cerrará y reiniciará explorer.exe temporalmente.",
+                  "tooltip": "Detener explorer.exe, limpiar IconCache.db / iconcache* y reiniciar Explorer"
+                }
+              ]
+            },
+            {
+              "id": "util_appx",
+              "title": "Paquetes AppX / Shell",
+              "actions": [
+                {
+                  "label": "Re-registrar AppX",
+                  "style": "PrimaryButton",
+                  "type": "task",
+                  "task": "util_reregister_appx",
+                  "confirm": "¿Re-registrar los paquetes AppX para todos los usuarios?\n\nSe verificará/iniciará MpsSvc antes del registro.",
+                  "tooltip": "Verificar servicio MpsSvc y re-registrar paquetes AppX en PowerShell"
+                }
+              ]
+            },
+            {
+              "id": "util_temp_cleanup",
+              "title": "Temporales y Windows Update",
+              "actions": [
+                {
+                  "label": "Limpiar Temporales",
+                  "style": "",
+                  "type": "task",
+                  "task": "util_clean_temp",
+                  "tooltip": "Limpiar %TEMP% y C:\\Windows\\Temp omitiendo archivos en uso"
+                },
+                {
+                  "label": "Temporales + WinUpdate",
+                  "style": "PrimaryButton",
+                  "type": "task",
+                  "task": "util_clean_temp_wu",
+                  "confirm": "¿Limpiar temporales y caché de Windows Update?\n\nSe detendrán temporalmente wuauserv y bits para vaciar SoftwareDistribution\\Download.",
+                  "tooltip": "Limpiar temporales y caché de descargas de Windows Update"
+                }
+              ]
+            },
+            {
+              "id": "util_print_spooler",
+              "title": "Cola de Impresión (Spooler)",
+              "actions": [
+                {
+                  "label": "Reiniciar Spooler",
+                  "style": "PrimaryButton",
+                  "type": "task",
+                  "task": "util_restart_spooler",
+                  "tooltip": "Detener Spooler, vaciar carpeta PRINTERS y reiniciar servicio"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "title": "SISTEMA Y RED",
+          "items": [
+            {
+              "id": "dotnet_35",
+              "title": ".NET Framework 3.5",
+              "status_source": "dotnet35",
+              "actions": [
+                {
+                  "label": "Verificar",
+                  "style": "",
+                  "type": "task",
+                  "task": "refresh_dotnet35_status",
+                  "tooltip": "Consultar estado en HKLM\\SOFTWARE\\Microsoft\\NET Framework Setup\\NDP\\v3.5"
+                },
+                {
+                  "label": "Habilitar",
+                  "style": "PrimaryButton",
+                  "type": "task",
+                  "task": "open_optional_features",
+                  "tooltip": "Abrir Características de Windows (optionalfeatures.exe)"
                 }
               ]
             },
@@ -734,8 +966,9 @@
                 {
                   "label": "Abrir",
                   "style": "PrimaryButton",
-                  "type": "exe",
-                  "path": "\\\\172.30.0.13\\it\\CMD\\Utilidades\\GestorRedes.exe"
+                  "type": "task",
+                  "task": "open_network_manager_view",
+                  "tooltip": "Abrir la vista integrada de Gestor de Redes (adaptadores, renovación/caché y diagnóstico)"
                 }
               ]
             }
@@ -751,9 +984,9 @@
                 {
                   "label": "Ejecutar",
                   "style": "PrimaryButton",
-                  "type": "bat",
-                  "path": "\\\\172.30.0.13\\it\\CMD\\Utilidades\\Suite-M365-Saneamiento\\Iniciar-M365Sanitizer.bat",
-                  "tooltip": "Ejecutar Iniciar-M365Sanitizer.bat desde ruta UNC usando pushd/popd"
+                  "type": "task",
+                  "task": "open_m365_sanitizer_dialog",
+                  "tooltip": "Abrir Suite-M365-Saneamiento integrada (diagnóstico, identidad, licencias y desinstalación)"
                 }
               ]
             },
