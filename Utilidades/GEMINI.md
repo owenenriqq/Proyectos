@@ -3,7 +3,7 @@
 Este subproyecto hereda las reglas globales de `../GEMINI.md` y define las siguientes directrices específicas:
 
 ## Propósito y Alcance
-- **Proyecto 100% standalone**: Orientado a soporte técnico particular y mantenimiento preventivo/correctivo de Windows 10/11.
+- **Proyecto 100% standalone**: Orientado a soporte técnico particular y mantenimiento preventivo/correctivo de Windows 10/11. Sigue compilándose como ejecutable independiente para soporte particular, mientras su lógica base se comparte y sincroniza con `..\EzSetup\EzSetup_Python\src\modules\utilities\`.
 - **Sin dependencias corporativas**: Prohibido incluir referencias, rutas UNC, dominios o configuraciones corporativas de Eidico.
 
 ## Ejecución de Comandos y Privilegios

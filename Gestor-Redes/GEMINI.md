@@ -1,6 +1,6 @@
 # Reglas del Proyecto — Gestor-Redes
 
-- `Gestor-Redes\` es un proyecto **100% standalone**: sin dependencias externas de configuración JSON, sin referencias corporativas y sin gestión de redes privadas externas.
+- `Gestor-Redes\` es un proyecto **100% standalone**: sigue compilándose como ejecutable independiente para soporte particular, sin dependencias externas de configuración JSON, sin referencias corporativas y sin gestión de redes privadas externas. Su lógica base se comparte y sincroniza con `..\EzSetup\EzSetup_Python\src\modules\network\`.
 - Todas las ejecuciones de comandos del sistema (`netsh`, `ipconfig`, `ping`, `tracert`, `nslookup`, `route`, `arp`, `powershell`) deben usar estrictamente **`shell=False`** y **`CREATE_NO_WINDOW`**.
 - Validar siempre direcciones IPv4, máscaras de subred, puertos TCP y nombres de host antes de invocar cualquier utilidad del sistema (`net_tasks.py`).
 - Escapar correctamente todo parámetro dinámico pasado a PowerShell (`_ps_quote`) para evitar inyección de comandos.

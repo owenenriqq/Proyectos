@@ -78,6 +78,16 @@ def _create_eye_icon(crossed: bool = False) -> QIcon:
     return QIcon(pixmap)
 
 
+def normalize_eidico_username(raw_user: str) -> str:
+    """Normaliza un usuario agregando el prefijo fijo 'eidico\\' sin duplicarlo."""
+    clean = raw_user.strip()
+    while clean.lower().startswith("eidico\\"):
+        clean = clean[7:].lstrip("\\").strip()
+    if not clean:
+        return ""
+    return f"eidico\\{clean}"
+
+
 class _CredentialEntryBlock(QFrame):
     """Bloque de entrada manual de usuario y contraseña para un servidor."""
 
@@ -98,11 +108,14 @@ class _CredentialEntryBlock(QFrame):
         form = QFormLayout()
         form.setSpacing(6)
 
-        self.username_edit = QLineEdit()
-        self.username_edit.setPlaceholderText("Usuario (ej: dominio\\usuario)")
-        hint = str(server_info.get("default_user_hint", "")).strip()
-        if hint:
-            self.username_edit.setText(hint)
+        user_row = QHBoxLayout()
+        user_row.setSpacing(6)
+        self.domain_prefix_label = QLabel("eidico\\", self)
+        self.domain_prefix_label.setObjectName("RowMeta")
+        self.username_edit = QLineEdit(self)
+        self.username_edit.setPlaceholderText("ej. oenrique o fexterno")
+        user_row.addWidget(self.domain_prefix_label)
+        user_row.addWidget(self.username_edit, stretch=1)
 
         pwd_row = QHBoxLayout()
         pwd_row.setSpacing(6)
@@ -122,7 +135,7 @@ class _CredentialEntryBlock(QFrame):
         pwd_row.addWidget(self.password_edit)
         pwd_row.addWidget(self.toggle_btn)
 
-        form.addRow("Usuario:", self.username_edit)
+        form.addRow("Usuario:", user_row)
         form.addRow("Contraseña:", pwd_row)
         layout.addLayout(form)
 
@@ -137,7 +150,7 @@ class _CredentialEntryBlock(QFrame):
             self.toggle_btn.setToolTip("Mostrar contraseña")
 
     def get_values(self) -> tuple[str, str]:
-        return self.username_edit.text().strip(), self.password_edit.text()
+        return normalize_eidico_username(self.username_edit.text()), self.password_edit.text()
 
 
 class CredentialDialog(QDialog):
@@ -154,6 +167,7 @@ class CredentialDialog(QDialog):
         self._log_callback = log_callback
         self._servers = config.get_servers()
         self._blocks: dict[str, _CredentialEntryBlock] = {}
+        self._server_checks: dict[str, QCheckBox] = {}
         self._enc_path: Path | None = config.resolve_credentials_enc_path()
         self._resolved_entries: list[dict[str, Any]] = []
 
@@ -164,6 +178,25 @@ class CredentialDialog(QDialog):
         root = QVBoxLayout(self)
         root.setContentsMargins(16, 16, 16, 16)
         root.setSpacing(10)
+
+        servers_card = QFrame(self)
+        servers_card.setObjectName("ActionRow")
+        servers_layout = QVBoxLayout(servers_card)
+        servers_layout.setContentsMargins(12, 10, 12, 10)
+        servers_layout.setSpacing(6)
+        servers_title = QLabel("Servidores a configurar:", servers_card)
+        servers_title.setObjectName("RowTitle")
+        servers_layout.addWidget(servers_title)
+
+        for key, info in self._servers.items():
+            display = f"{info.get('label', key)} ({info.get('host', '')})"
+            chk = QCheckBox(display, servers_card)
+            chk.setChecked(True)
+            chk.toggled.connect(self._refresh_visible_blocks)
+            self._server_checks[key] = chk
+            servers_layout.addWidget(chk)
+
+        root.addWidget(servers_card)
 
         mode_row = QHBoxLayout()
         mode_row.setSpacing(14)
@@ -254,17 +287,13 @@ class CredentialDialog(QDialog):
         layout.setContentsMargins(0, 4, 0, 4)
         layout.setSpacing(8)
 
-        selector_row = QHBoxLayout()
-        selector_row.addWidget(QLabel("Servidor:"))
-        self.target_combo = QComboBox()
-        for key, info in self._servers.items():
-            display = f"{info.get('label', key)} ({info.get('host', '')})"
-            self.target_combo.addItem(display, userData=key)
-        if len(self._servers) > 1:
-            self.target_combo.addItem("Todos los servidores", userData="__all__")
-        self.target_combo.currentIndexChanged.connect(self._refresh_visible_blocks)
-        selector_row.addWidget(self.target_combo, stretch=1)
-        layout.addLayout(selector_row)
+        self._no_servers_manual_label = QLabel(
+            "Seleccioná al menos un servidor arriba para ingresar sus credenciales.",
+            page,
+        )
+        self._no_servers_manual_label.setObjectName("LastLogEvent")
+        self._no_servers_manual_label.setVisible(False)
+        layout.addWidget(self._no_servers_manual_label)
 
         for key, info in self._servers.items():
             block = _CredentialEntryBlock(key, info, page)
@@ -304,15 +333,14 @@ class CredentialDialog(QDialog):
         self.adjustSize()
 
     def _active_server_keys(self) -> list[str]:
-        selected = self.target_combo.currentData()
-        if selected == "__all__":
-            return list(self._servers.keys())
-        return [str(selected)]
+        return [key for key, chk in self._server_checks.items() if chk.isChecked()]
 
-    def _refresh_visible_blocks(self, _index: int = 0) -> None:
+    def _refresh_visible_blocks(self, _checked: bool = False) -> None:
         active = set(self._active_server_keys())
         for key, block in self._blocks.items():
             block.setVisible(key in active)
+        if hasattr(self, "_no_servers_manual_label"):
+            self._no_servers_manual_label.setVisible(len(active) == 0)
         self.adjustSize()
 
     def _emit_log(self, msg: str) -> None:
@@ -320,6 +348,15 @@ class CredentialDialog(QDialog):
             self._log_callback(msg)
 
     def _on_accept(self) -> None:
+        selected_keys = self._active_server_keys()
+        if not selected_keys:
+            QMessageBox.warning(
+                self,
+                "Sin servidores seleccionados",
+                "Seleccioná al menos un servidor para registrar sus credenciales.",
+            )
+            return
+
         create_lnk = self.shortcut_checkbox.isChecked()
 
         if self.master_radio.isChecked():
@@ -372,7 +409,7 @@ class CredentialDialog(QDialog):
                 return
 
             entries: list[dict[str, Any]] = []
-            for server_key in self._servers:
+            for server_key in selected_keys:
                 item = decrypted.get(server_key)
                 if not item:
                     continue
@@ -389,7 +426,7 @@ class CredentialDialog(QDialog):
                 QMessageBox.warning(
                     self,
                     "Sin coincidencias",
-                    "El archivo descifrado no contiene credenciales para los servidores configurados.",
+                    "El archivo descifrado no contiene credenciales para los servidores seleccionados.",
                 )
                 return
 
@@ -398,7 +435,7 @@ class CredentialDialog(QDialog):
             return
 
         manual_entries: list[dict[str, Any]] = []
-        for key in self._active_server_keys():
+        for key in selected_keys:
             user, pwd = self._blocks[key].get_values()
             if not user or not pwd:
                 label = self._servers[key].get("label", key)
@@ -408,11 +445,6 @@ class CredentialDialog(QDialog):
                     f"Completá usuario y contraseña para {label}.",
                 )
                 return
-
-            hint = str(self._servers[key].get("default_user_hint", "")).strip()
-            if "\\" not in user and "\\" in hint:
-                domain_prefix = hint.split("\\", 1)[0]
-                user = f"{domain_prefix}\\{user}"
 
             manual_entries.append(
                 {

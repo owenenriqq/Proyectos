@@ -2,6 +2,8 @@
 
 Este proyecto hereda todas las reglas globales definidas en `../GEMINI.md`.
 
+> **Estado en el monorepo:** La funcionalidad de `Inventario Eidico` ya está integrada de forma nativa en `..\EzSetup\EzSetup_Python` (`v3.0.0`). Este subproyecto se conserva únicamente como referencia y origen histórico.
+
 ## Reglas Específicas
 
 - **Stack tecnológico**: Python 3, PyQt6, `wmi`, `pythoncom`, `ctypes` y consultas de almacenamiento vía PowerShell (`Get-PhysicalDisk`).
