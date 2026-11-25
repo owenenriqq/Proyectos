@@ -96,13 +96,14 @@ def _run_ps_command(ps_script: str, log: LogCallback) -> str:
 
 
 def _build_logger_preamble() -> str:
-    """Construye el preámbulo PowerShell con codificación UTF-8 y logger estándar."""
+    """Construye el preámbulo PowerShell con codificación UTF-8 y logger directo a stdout."""
     return (
         "$OutputEncoding = [System.Text.Encoding]::UTF8; "
         "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; "
         "$ErrorActionPreference = 'Stop'; "
         "$ezLogger = { param([string]$Message, [string]$Level = 'INFO') "
-        "Write-Output \"[$Level] $Message\" }; "
+        "[Console]::Out.WriteLine(\"[$Level] $Message\"); "
+        "[Console]::Out.Flush() }; "
     )
 
 
@@ -119,11 +120,13 @@ def run_office_diagnostics(
         _build_logger_preamble()
         + f". '{mod_path}'; "
         + "$diag = Get-OfficeDiagnostics -Logger $ezLogger; "
-        + "if ($diag.ParsedLicenses -and $diag.ParsedLicenses.Count -gt 0) { "
-        + "Write-Output '[INFO] --- Resumen de licencias detectadas ---'; "
+        + "if ($null -ne $diag -and $diag.PSObject.Properties['ParsedLicenses'] "
+        + "-and $diag.ParsedLicenses -and $diag.ParsedLicenses.Count -gt 0) { "
+        + "[Console]::Out.WriteLine('[INFO] --- Resumen de licencias detectadas ---'); "
         + "foreach ($lic in $diag.ParsedLicenses) { "
-        + "Write-Output \"[INFO] [$($lic.Category)] $($lic.LicenseName) | Estado: $($lic.LicenseStatus) | Clave: $($lic.PartialKey)\" "
-        + "} }"
+        + "[Console]::Out.WriteLine(\"[INFO] [$($lic.Category)] $($lic.LicenseName) | Estado: $($lic.LicenseStatus) | Clave: $($lic.PartialKey)\") "
+        + "} "
+        + "[Console]::Out.Flush() }"
     )
     _run_ps_command(ps_script, log)
     return "Diagnóstico de Office / Microsoft 365 completado."
@@ -144,7 +147,7 @@ def run_clear_identity_cache(
     ps_script = (
         _build_logger_preamble()
         + f". '{mod_path}'; "
-        + f"Clear-IdentityCache -Logger $ezLogger -Confirm:$false{whatif_flag}"
+        + f"Clear-IdentityCache -Logger $ezLogger -Confirm:$false{whatif_flag} *>&1 | Out-String -Stream"
     )
     _run_ps_command(ps_script, log)
     return f"Limpieza de caché de identidad finalizada ({mode_label})."
@@ -170,7 +173,7 @@ def run_reset_office_licenses(
     ps_script = (
         _build_logger_preamble()
         + f". '{mod_path}'; "
-        + f"Reset-OfficeLicenses -Mode '{mode}' -BackupRoot '{backup_root}' -Logger $ezLogger -Confirm:$false{whatif_flag}"
+        + f"Reset-OfficeLicenses -Mode '{mode}' -BackupRoot '{backup_root}' -Logger $ezLogger -Confirm:$false{whatif_flag} *>&1 | Out-String -Stream"
     )
     _run_ps_command(ps_script, log)
     return f"Saneamiento de licencias finalizado ({mode} - {mode_label})."
@@ -199,16 +202,17 @@ def run_uninstall_office_products(
         + "if ($null -ne $item -and $item.PSObject.Properties['InstallationPath'] -and -not [string]::IsNullOrWhiteSpace([string]$item.InstallationPath)) { "
         + "$p = ([string]$item.InstallationPath).Trim().TrimEnd('\\'); "
         + "if ($p -and ($installPaths -notcontains $p)) { $installPaths += $p } } }; "
-        + "Stop-OfficeUserApplications -Logger $ezLogger -Confirm:$false -WhatIf:$sim; "
+        + "Stop-OfficeUserApplications -Logger $ezLogger -Confirm:$false -WhatIf:$sim *>&1 | Out-String -Stream; "
         + "if ($inventory.Count -gt 0) { "
         + "$c2rExe = Get-OfficeClickToRunExePath -InstallationPaths $installPaths; "
         + "foreach ($prod in $inventory) { "
         + "[void](Invoke-SingleProductUninstall -Product $prod -ClickToRunExePath $c2rExe -Logger $ezLogger -Confirm:$false -WhatIf:$sim) "
         + "} "
         + "} else { "
-        + "Write-Output '[INFO] No se detectaron productos activos en registro; ejecutando limpieza de residuos.' "
+        + "[Console]::Out.WriteLine('[INFO] No se detectaron productos activos en registro; ejecutando limpieza de residuos.'); "
+        + "[Console]::Out.Flush() "
         + "}; "
-        + f"Invoke-OfficeDeepCleanup -DetectedInstallationPaths $installPaths -BackupRoot '{backup_root}' -Logger $ezLogger -Confirm:$false -WhatIf:$sim"
+        + f"Invoke-OfficeDeepCleanup -DetectedInstallationPaths $installPaths -BackupRoot '{backup_root}' -Logger $ezLogger -Confirm:$false -WhatIf:$sim *>&1 | Out-String -Stream"
     )
     _run_ps_command(ps_script, log)
     return f"Desinstalación y limpieza profunda de Office finalizada ({mode_label})."

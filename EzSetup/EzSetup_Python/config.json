@@ -1,9 +1,9 @@
 {
   "app": {
     "name": "EzSetup",
-    "version": "2.5.0",
-    "title": "EzSetup",
-    "app_user_model_id": "Eidico.EzSetup.2.5",
+    "version": "3.0.0",
+    "title": "EzSetup v3.0.0",
+    "app_user_model_id": "Eidico.EzSetup.3.0",
     "copy_chunk_size_bytes": 65536,
     "server_check_interval_ms": 15000,
     "internet_probe_host": "1.1.1.1"
@@ -699,19 +699,19 @@
                   "tooltip": "Analizar integridad del almacén de componentes (DISM /ScanHealth)"
                 },
                 {
-                  "label": "RestoreHealth",
+                  "label": "ComponentCleanup",
                   "style": "",
+                  "type": "task",
+                  "task": "util_dism_cleanup",
+                  "tooltip": "Limpiar componentes obsoletos (DISM /StartComponentCleanup)"
+                },
+                {
+                  "label": "RestoreHealth",
+                  "style": "PrimaryButton",
                   "type": "task",
                   "task": "util_dism_restore",
                   "confirm": "¿Ejecutar DISM /RestoreHealth /NoRestart?\n\nEsta operación puede demorar varios minutos.",
                   "tooltip": "Reparar imagen de Windows (DISM /RestoreHealth /NoRestart)"
-                },
-                {
-                  "label": "ComponentCleanup",
-                  "style": "PrimaryButton",
-                  "type": "task",
-                  "task": "util_dism_cleanup",
-                  "tooltip": "Limpiar componentes obsoletos (DISM /StartComponentCleanup)"
                 }
               ]
             },
@@ -964,7 +964,7 @@
                   "tooltip": "Ejecutar ipconfig /flushdns, /release, /renew y /registerdns y verificar conectividad"
                 },
                 {
-                  "label": "Abrir",
+                  "label": "Ir a Redes",
                   "style": "PrimaryButton",
                   "type": "task",
                   "task": "open_network_manager_view",

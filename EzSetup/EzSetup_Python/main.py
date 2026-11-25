@@ -1,4 +1,4 @@
-"""Punto de entrada de EzSetup v2.0 con verificación/elevación UAC."""
+"""Punto de entrada de EzSetup v3.0.0 con verificación/elevación UAC."""
 
 from __future__ import annotations
 
@@ -64,7 +64,7 @@ def main() -> int:
         return 1
 
     if os.name == "nt":
-        app_id = str(config.app.get("app_user_model_id", "Eidico.EzSetup.2.0"))
+        app_id = str(config.app.get("app_user_model_id", "Eidico.EzSetup.3.0"))
         try:
             ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(app_id)
         except Exception:

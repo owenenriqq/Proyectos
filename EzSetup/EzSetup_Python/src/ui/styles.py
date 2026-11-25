@@ -1,5 +1,29 @@
 """Hoja de estilos QSS monocromática (negro, gris y blanco) para EzSetup."""
 
+from __future__ import annotations
+
+from pathlib import Path
+import sys
+
+
+def _resolve_check_icon_rule() -> str:
+    """Resuelve la ruta de assets/check_dark.png para QCheckBox::indicator:checked."""
+    candidates: list[Path] = []
+    if getattr(sys, "frozen", False):
+        candidates.append(Path(sys.executable).resolve().parent / "assets" / "check_dark.png")
+        meipass = getattr(sys, "_MEIPASS", None)
+        if meipass:
+            candidates.append(Path(meipass).resolve() / "assets" / "check_dark.png")
+    candidates.append(Path(__file__).resolve().parents[2] / "assets" / "check_dark.png")
+
+    for icon_path in candidates:
+        if icon_path.is_file():
+            return f'    image: url("{icon_path.as_posix()}");'
+    return ""
+
+
+_CHECK_ICON_RULE = _resolve_check_icon_rule()
+
 DARK_THEME_QSS = """
 QMainWindow, QWidget {
     background-color: #0F1012;
@@ -384,6 +408,12 @@ QLineEdit:disabled, QComboBox:disabled, QDateEdit:disabled, QSpinBox:disabled {
     border-color: #202328;
 }
 
+QComboBox:disabled {
+    background-color: #15171B;
+    color: #8E8E98;
+    border-color: #272A30;
+}
+
 QTabWidget::pane {
     border: none;
     border-top: 1px solid #272A30;
@@ -475,12 +505,51 @@ QCheckBox, QRadioButton {
     background-color: transparent;
 }
 
+QCheckBox:disabled {
+    color: #71717A;
+}
+
+QCheckBox::indicator {
+    width: 16px;
+    height: 16px;
+    border: 1px solid #52525B;
+    background-color: #17191D;
+    border-radius: 4px;
+}
+
+QCheckBox::indicator:hover {
+    border-color: #A1A1AA;
+    background-color: #1F2228;
+}
+
+QCheckBox::indicator:checked {
+    border: 1px solid #F4F4F5;
+    background-color: #F4F4F5;
+__CHECK_ICON_RULE__
+}
+
+QCheckBox::indicator:checked:hover {
+    border-color: #DCDCE0;
+    background-color: #DCDCE0;
+}
+
+QCheckBox::indicator:disabled {
+    border-color: #323640;
+    background-color: #131518;
+}
+
+QCheckBox::indicator:checked:disabled {
+    border-color: #71717A;
+    background-color: #71717A;
+__CHECK_ICON_RULE__
+}
+
 QRadioButton::indicator {
     width: 14px;
     height: 14px;
-    border-radius: 8px;
+    border-radius: 9px;
     border: 2px solid #71717A;
-    background-color: #0F1012;
+    background-color: #17191D;
 }
 
 QRadioButton::indicator:hover {
@@ -489,7 +558,19 @@ QRadioButton::indicator:hover {
 
 QRadioButton::indicator:checked {
     border: 2px solid #F4F4F5;
-    background-color: #F4F4F5;
+    background-color: qradialgradient(
+        cx: 0.5, cy: 0.5, radius: 0.5,
+        fx: 0.5, fy: 0.5,
+        stop: 0.0 #F4F4F5,
+        stop: 0.42 #F4F4F5,
+        stop: 0.48 #17191D,
+        stop: 1.0 #17191D
+    );
+}
+
+QRadioButton::indicator:disabled {
+    border-color: #3A3F48;
+    background-color: #131518;
 }
 
 QProgressBar {
@@ -525,4 +606,4 @@ QScrollBar::handle:vertical:hover {
 QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
     height: 0px;
 }
-"""
+""".replace("__CHECK_ICON_RULE__", _CHECK_ICON_RULE)

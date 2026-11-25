@@ -154,7 +154,9 @@ class ActionRow(QFrame):
 
 
 class MainWindow(QMainWindow):
-    """Ventana principal de EzSetup v2.3."""
+    """Ventana principal de EzSetup v3.0.0."""
+
+    _LOG_COLLAPSED_HEIGHT = 40
 
     def __init__(self, config: AppConfig, is_admin: bool) -> None:
         super().__init__()
@@ -174,6 +176,7 @@ class MainWindow(QMainWindow):
         self._network_page_index: int = -1
         self._last_selected_row: int = 0
         self._log_collapsed = True
+        self._last_log_height: int = 180
 
         self.resize(1080, 650)
         self.setMinimumSize(900, 540)
@@ -212,6 +215,8 @@ class MainWindow(QMainWindow):
         self.splitter.setChildrenCollapsible(False)
 
         body = QWidget(self.splitter)
+        body.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self._body_widget = body
         body_layout = QHBoxLayout(body)
         body_layout.setContentsMargins(0, 0, 0, 0)
         body_layout.setSpacing(0)
@@ -238,6 +243,7 @@ class MainWindow(QMainWindow):
         self.splitter.addWidget(self._create_log_panel(self.splitter))
         self.splitter.setStretchFactor(0, 1)
         self.splitter.setStretchFactor(1, 0)
+        self._apply_log_panel_state(collapsed=True)
 
         root_layout.addWidget(self.splitter, stretch=1)
 
@@ -368,7 +374,6 @@ class MainWindow(QMainWindow):
         self.log_output.setVisible(False)
         layout.addWidget(self.log_output)
 
-        panel.setMaximumHeight(38)
         self._log_panel = panel
         return panel
 
@@ -382,16 +387,50 @@ class MainWindow(QMainWindow):
         self.search_input.setFocus()
         self.search_input.selectAll()
 
-    def _toggle_log_panel(self) -> None:
-        self._log_collapsed = not self._log_collapsed
-        self.log_output.setVisible(not self._log_collapsed)
-        if self._log_collapsed:
+    def _apply_log_panel_state(self, collapsed: bool) -> None:
+        """Alterna el estado del panel de log ajustando el QSplitter sin dejar espacio vacío."""
+        self._log_collapsed = collapsed
+        if collapsed:
+            if self.splitter.count() == 2:
+                sizes = self.splitter.sizes()
+                if len(sizes) == 2 and sizes[1] > self._LOG_COLLAPSED_HEIGHT + 20:
+                    self._last_log_height = sizes[1]
+
+            self.log_output.setVisible(False)
             self.toggle_log_btn.setText("Mostrar Log")
-            self._log_panel.setMaximumHeight(38)
+            self._log_panel.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+            self._log_panel.setFixedHeight(self._LOG_COLLAPSED_HEIGHT)
+            self.splitter.setHandleWidth(0)
+            if self.splitter.count() >= 2:
+                handle = self.splitter.handle(1)
+                if handle is not None:
+                    handle.setEnabled(False)
+
+            total = max(self.splitter.height(), sum(self.splitter.sizes()), 600)
+            self.splitter.setSizes(
+                [max(1, total - self._LOG_COLLAPSED_HEIGHT), self._LOG_COLLAPSED_HEIGHT]
+            )
         else:
             self.toggle_log_btn.setText("Ocultar Log")
+            self._log_panel.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+            self._log_panel.setMinimumHeight(110)
             self._log_panel.setMaximumHeight(16777215)
-            self.splitter.setSizes([420, 180])
+            self.log_output.setVisible(True)
+            self.splitter.setHandleWidth(4)
+            if self.splitter.count() >= 2:
+                handle = self.splitter.handle(1)
+                if handle is not None:
+                    handle.setEnabled(True)
+
+            total = max(self.splitter.height(), sum(self.splitter.sizes()), 600)
+            target_log = min(max(self._last_log_height, 140), max(180, total // 2))
+            self.splitter.setSizes([max(200, total - target_log), target_log])
+
+        self._log_panel.updateGeometry()
+        self.splitter.updateGeometry()
+
+    def _toggle_log_panel(self) -> None:
+        self._apply_log_panel_state(not self._log_collapsed)
 
     def _copy_logs(self) -> None:
         clipboard = QApplication.clipboard()
@@ -496,7 +535,7 @@ class MainWindow(QMainWindow):
         container = QWidget(scroll)
         container.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         layout = QVBoxLayout(container)
-        layout.setContentsMargins(18, 10, 18, 14)
+        layout.setContentsMargins(18, 10, 18, 16)
         layout.setSpacing(6)
         scroll.setWidget(container)
         return scroll, container, layout
@@ -831,7 +870,7 @@ class MainWindow(QMainWindow):
 
     def _reload_config(self) -> None:
         try:
-            new_cfg = AppConfig.load(self.config.source_path)
+            new_cfg = AppConfig.load()
         except ConfigError as exc:
             QMessageBox.warning(self, "Error al recargar config.json", str(exc))
             self.append_log(f"[ERROR] Falló recarga de config.json: {exc}")

@@ -124,19 +124,28 @@ class AppConfig:
         self.source_path = source_path
 
     @classmethod
+    def resolve_config_path(cls) -> Path:
+        """Resuelve config.json: 1) externo junto a EzSetup.exe, 2) _MEIPASS embebido, 3) desarrollo."""
+        candidates: list[Path] = []
+        if getattr(sys, "frozen", False):
+            candidates.append(resolve_app_root() / "config.json")
+            if hasattr(sys, "_MEIPASS"):
+                candidates.append(resolve_bundle_root() / "config.json")
+        else:
+            candidates.append(resolve_app_root() / "config.json")
+
+        for candidate in candidates:
+            if candidate.is_file():
+                return candidate
+
+        searched = ", ".join(str(p) for p in candidates)
+        raise ConfigError(f"No se encontró config.json en ninguna ruta esperada: {searched}")
+
+    @classmethod
     def load(cls, config_path: Path | None = None) -> "AppConfig":
         """Carga y valida config.json priorizando un archivo externo junto al ejecutable."""
         if config_path is None:
-            external_cfg = resolve_app_root() / "config.json"
-            bundled_cfg = resolve_bundle_root() / "config.json"
-            if external_cfg.is_file():
-                config_path = external_cfg
-            elif bundled_cfg.is_file():
-                config_path = bundled_cfg
-            else:
-                raise ConfigError(
-                    f"No se encontró config.json en {external_cfg} ni en {bundled_cfg}."
-                )
+            config_path = cls.resolve_config_path()
 
         if not config_path.is_file():
             raise ConfigError(f"El archivo de configuración no existe: {config_path}")

@@ -254,7 +254,7 @@ class NetworkManagerView(QWidget):
         container = QWidget(scroll)
         container.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         layout = QVBoxLayout(container)
-        layout.setContentsMargins(6, 10, 10, 12)
+        layout.setContentsMargins(6, 10, 10, 16)
         layout.setSpacing(7)
         scroll.setWidget(container)
         return scroll, container, layout
