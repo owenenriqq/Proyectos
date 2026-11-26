@@ -50,13 +50,13 @@ Gestor-Redes/
 - [x] `dialogs.py`: diálogos modales para configurar IPv4/DHCP (`IPConfigDialog`), DNS con presets (`DNSConfigDialog`), detalle de adaptador (`AdapterDetailsDialog`) y visor ampliado de diagnóstico (`DiagnosticResultDialog`).
 - [x] `main.py`: elevación UAC automática + badge interactivo `"Elevar Admin"`, indicador de conectividad externa en header, 3 vistas laterales (`Adaptadores de Red` sin scroll horizontal innecesario, `Renovación y Caché` con sección `SECUENCIAS AUTOMÁTICAS` y sin `ncpa.cpl` duplicado, `Diagnóstico de Red` con `Generar Reporte Completo` y exportación `.txt`), filtro rápido (`Ctrl+F`), refresco (`F5`), botón vectorial `⋮` y panel inferior de registro colapsable.
 - [x] `requirements.txt`, `build.ps1`, `.gitignore`, `GEMINI.md` y `ESTADO.md`.
+- [x] Crear `.venv` local en `Gestor-Redes\` e instalar `requirements.txt`.
+- [x] Compilar `dist\GestorRedes.exe` con `build.ps1` y validar el ejecutable standalone.
 
 ### En Progreso
 - Ninguno.
 
 ### Pendientes
-- [x] Crear `.venv` local en `Gestor-Redes\` e instalar `requirements.txt`.
-- [x] Compilar `dist\GestorRedes.exe` con `build.ps1` y validar el ejecutable standalone.
 - [ ] Ejecutar prueba interactiva con privilegios UAC sobre un adaptador real (cambio DHCP/IP estática, DNS, habilitar/deshabilitar, Reparación Rápida y Limpieza Profunda).
 
 ---
