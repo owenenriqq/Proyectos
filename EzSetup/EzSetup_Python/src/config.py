@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ctypes
 from ctypes import wintypes
+import ipaddress
 import json
 import os
 from pathlib import Path
@@ -368,3 +369,51 @@ class AppConfig:
             "output_filename": output_filename,
             "property_options": property_options,
         }
+
+    def get_vpn_endpoints(self) -> dict[str, dict[str, Any]]:
+        """Retorna y valida los enlaces VPN configurados en vpn_endpoints."""
+        raw = self._data.get("vpn_endpoints", {})
+        if not isinstance(raw, dict):
+            raise ConfigError("La sección 'vpn_endpoints' en config.json debe ser un objeto.")
+
+        validated: dict[str, dict[str, Any]] = {}
+        for key, entry in raw.items():
+            if not isinstance(entry, dict):
+                raise ConfigError(f"El enlace VPN '{key}' debe ser un objeto JSON.")
+            name = str(entry.get("name", "")).strip()
+            host = str(entry.get("host", "")).strip()
+            ip_str = str(entry.get("ip", "")).strip()
+            if not name or not ip_str:
+                raise ConfigError(f"El enlace VPN '{key}' debe definir 'name' e 'ip'.")
+            try:
+                ipaddress.ip_address(ip_str)
+            except ValueError as exc:
+                raise ConfigError(f"IP inválida en vpn_endpoints.{key}: '{ip_str}'") from exc
+            try:
+                port = int(entry.get("port", 0))
+            except (TypeError, ValueError) as exc:
+                raise ConfigError(f"Puerto inválido en vpn_endpoints.{key}") from exc
+            if not (1 <= port <= 65535):
+                raise ConfigError(f"Puerto fuera de rango (1-65535) en vpn_endpoints.{key}: {port}")
+            protocol = str(entry.get("protocol", "tcp")).strip().lower() or "tcp"
+            if protocol not in ("tcp", "udp"):
+                raise ConfigError(
+                    f"Protocolo inválido en vpn_endpoints.{key}: '{protocol}' (usar 'tcp' o 'udp')"
+                )
+
+            validated[str(key)] = {
+                "key": str(key),
+                "name": name,
+                "host": host,
+                "ip": ip_str,
+                "port": port,
+                "protocol": protocol,
+            }
+        return validated
+
+    def get_vpn_endpoint(self, key: str) -> dict[str, Any]:
+        """Retorna un enlace VPN validado por clave."""
+        endpoints = self.get_vpn_endpoints()
+        if key not in endpoints:
+            raise ConfigError(f"Enlace VPN no configurado en config.json: '{key}'")
+        return endpoints[key]

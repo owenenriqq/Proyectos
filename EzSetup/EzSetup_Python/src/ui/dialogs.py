@@ -7,7 +7,7 @@ import os
 from pathlib import Path
 from typing import Any, Callable
 
-from PyQt6.QtCore import QDate, QPointF, QSize, Qt, pyqtSignal
+from PyQt6.QtCore import QDate, QPointF, QSize, Qt, QThread, pyqtSignal
 from PyQt6.QtGui import QCloseEvent, QColor, QIcon, QPainter, QPainterPath, QPen, QPixmap
 from PyQt6.QtWidgets import (
     QApplication,
@@ -21,6 +21,8 @@ from PyQt6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QListWidget,
+    QListWidgetItem,
     QMessageBox,
     QPlainTextEdit,
     QProgressBar,
@@ -39,6 +41,7 @@ from src.crypto_store import (
     CredentialIOError,
     load_encrypted_credentials,
 )
+from src.modules import m365_wrapper
 from src.modules.inventory.inventory_tasks import (
     collect_hardware_info,
     export_inventory_record_local,
@@ -699,17 +702,33 @@ class PrinterInstallDialog(QDialog):
         return list(self._selected_printers)
 
 
+class _OfficeProductsScanWorker(QThread):
+    """Detecta productos Office / Project / Visio instalados sin bloquear la UI."""
+
+    products_ready = pyqtSignal(list)
+    failed = pyqtSignal(str)
+
+    def run(self) -> None:
+        try:
+            items = m365_wrapper.list_installed_office_products()
+            self.products_ready.emit(items)
+        except Exception as exc:
+            self.failed.emit(str(exc))
+
+
 class M365SanitizerDialog(QDialog):
     """Diálogo selector para ejecutar acciones no interactivas de Suite-M365-Saneamiento."""
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setWindowTitle("Suite-M365-Saneamiento")
-        self.setMinimumWidth(520)
+        self.setMinimumWidth(580)
         self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
         self.setModal(True)
 
         self._selected_options: dict[str, Any] = {}
+        self._scan_worker: _OfficeProductsScanWorker | None = None
+        self._products_loaded = False
 
         root = QVBoxLayout(self)
         root.setContentsMargins(20, 18, 20, 18)
@@ -739,13 +758,18 @@ class M365SanitizerDialog(QDialog):
         self.rb_diagnostics.setChecked(True)
         card_layout.addWidget(self.rb_diagnostics)
 
+        self.rb_stop_apps = QRadioButton(
+            "2. Cerrar procesos activos de Office / Project / Visio"
+        )
+        card_layout.addWidget(self.rb_stop_apps)
+
         self.rb_identity = QRadioButton(
-            "2. Limpiar caché de identidad (WAM, OneAuth, IdentityCache, cmdkey)"
+            "3. Limpiar caché de identidad (WAM, OneAuth, IdentityCache, cmdkey)"
         )
         card_layout.addWidget(self.rb_identity)
 
         self.rb_licenses = QRadioButton(
-            "3. Restablecer licencias y sppc.dll (Ohook / vNext)"
+            "4. Restablecer licencias y sppc.dll (Ohook / vNext)"
         )
         card_layout.addWidget(self.rb_licenses)
 
@@ -761,8 +785,37 @@ class M365SanitizerDialog(QDialog):
         lic_mode_row.addWidget(self.lic_mode_combo, 1)
         card_layout.addLayout(lic_mode_row)
 
+        self.rb_uninstall_selective = QRadioButton(
+            "5. Desinstalar productos seleccionados (Office / Project / Visio)"
+        )
+        card_layout.addWidget(self.rb_uninstall_selective)
+
+        selective_box = QWidget()
+        selective_layout = QVBoxLayout(selective_box)
+        selective_layout.setContentsMargins(24, 0, 0, 0)
+        selective_layout.setSpacing(6)
+
+        scan_row = QHBoxLayout()
+        scan_row.setSpacing(8)
+        self.selective_status_lbl = QLabel("Hacé clic en 'Detectar instalados' para listar productos.")
+        self.selective_status_lbl.setObjectName("MutedText")
+        scan_row.addWidget(self.selective_status_lbl, 1)
+        self.detect_products_btn = QPushButton("Detectar instalados")
+        self.detect_products_btn.setProperty("compact", True)
+        self.detect_products_btn.clicked.connect(self._scan_installed_products)
+        scan_row.addWidget(self.detect_products_btn)
+        selective_layout.addLayout(scan_row)
+
+        self.products_list = QListWidget()
+        self.products_list.setMaximumHeight(110)
+        self.products_list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.products_list.setWordWrap(True)
+        selective_layout.addWidget(self.products_list)
+        self._selective_box = selective_box
+        card_layout.addWidget(selective_box)
+
         self.rb_uninstall = QRadioButton(
-            "4. Desinstalación total y limpieza profunda de Office"
+            "6. Desinstalación total y limpieza profunda de Office"
         )
         card_layout.addWidget(self.rb_uninstall)
 
@@ -789,8 +842,10 @@ class M365SanitizerDialog(QDialog):
 
         for rb in (
             self.rb_diagnostics,
+            self.rb_stop_apps,
             self.rb_identity,
             self.rb_licenses,
+            self.rb_uninstall_selective,
             self.rb_uninstall,
         ):
             rb.toggled.connect(self._update_controls_state)
@@ -799,22 +854,89 @@ class M365SanitizerDialog(QDialog):
     def _update_controls_state(self) -> None:
         is_diag = self.rb_diagnostics.isChecked()
         is_lic = self.rb_licenses.isChecked()
+        is_sel = self.rb_uninstall_selective.isChecked()
         self.lic_mode_label.setEnabled(is_lic)
         self.lic_mode_combo.setEnabled(is_lic)
+        self._selective_box.setVisible(is_sel)
         self.whatif_chk.setEnabled(not is_diag)
+        if is_sel and not self._products_loaded:
+            self._scan_installed_products()
+        self.adjustSize()
+
+    def _scan_installed_products(self) -> None:
+        if self._scan_worker is not None and self._scan_worker.isRunning():
+            return
+        self._products_loaded = True
+        self.detect_products_btn.setEnabled(False)
+        self.selective_status_lbl.setText("Detectando productos de Office instalados...")
+        self.products_list.clear()
+
+        worker = _OfficeProductsScanWorker(self)
+        worker.products_ready.connect(self._on_products_detected)
+        worker.failed.connect(self._on_products_scan_failed)
+        worker.finished.connect(lambda: self.detect_products_btn.setEnabled(True))
+        self._scan_worker = worker
+        worker.start()
+
+    def _on_products_detected(self, items: list[dict[str, Any]]) -> None:
+        self.products_list.clear()
+        if not items:
+            self.selective_status_lbl.setText("No se detectaron productos Office / Project / Visio.")
+            return
+
+        self.selective_status_lbl.setText(f"Se detectaron {len(items)} producto(s). Marcá los a desinstalar:")
+        for item in items:
+            name = str(item.get("DisplayName") or item.get("ProductId") or "Producto")
+            pid = str(item.get("ProductId") or "")
+            cat = str(item.get("Category") or "Office")
+            ver = str(item.get("Version") or "")
+            label = f"[{cat}] {name}" + (f" · {ver}" if ver else "")
+            list_item = QListWidgetItem(label, self.products_list)
+            list_item.setFlags(list_item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+            list_item.setCheckState(Qt.CheckState.Unchecked)
+            list_item.setData(Qt.ItemDataRole.UserRole, pid)
+
+    def _on_products_scan_failed(self, err: str) -> None:
+        self.selective_status_lbl.setText(f"Error al detectar productos: {err}")
+
+    def _get_selected_product_ids(self) -> list[str]:
+        selected: list[str] = []
+        for idx in range(self.products_list.count()):
+            item = self.products_list.item(idx)
+            if item is not None and item.checkState() == Qt.CheckState.Checked:
+                pid = str(item.data(Qt.ItemDataRole.UserRole) or "").strip()
+                if pid:
+                    selected.append(pid)
+        return selected
 
     def _on_accept(self) -> None:
         what_if = self.whatif_chk.isChecked()
+        selected_product_ids: list[str] = []
+
         if self.rb_diagnostics.isChecked():
             action = "diagnostics"
             label = "Diagnóstico M365 (solo lectura)"
             what_if = True
+        elif self.rb_stop_apps.isChecked():
+            action = "stop_apps"
+            label = "Cerrar procesos activos de Office / Project / Visio"
         elif self.rb_identity.isChecked():
             action = "identity"
             label = "Limpieza de Caché de Identidad M365"
         elif self.rb_licenses.isChecked():
             action = "licenses"
             label = f"Restablecer Licencias Office ({self.lic_mode_combo.currentData()})"
+        elif self.rb_uninstall_selective.isChecked():
+            selected_product_ids = self._get_selected_product_ids()
+            if not selected_product_ids:
+                QMessageBox.warning(
+                    self,
+                    "Selección requerida",
+                    "Marcá al menos un producto instalado para desinstalar.",
+                )
+                return
+            action = "uninstall_selective"
+            label = f"Desinstalación selectiva Office ({len(selected_product_ids)})"
         else:
             action = "uninstall"
             label = "Desinstalación y Limpieza Profunda Office"
@@ -822,10 +944,16 @@ class M365SanitizerDialog(QDialog):
         if action != "diagnostics" and not what_if:
             warning_text = (
                 f"Vas a ejecutar '{label}' en MODO REAL.\n\n"
-                "Esta operación modificará cachés, credenciales o productos de Microsoft Office en el equipo.\n"
+                "Esta operación modificará procesos, cachés, credenciales o productos de Microsoft Office en el equipo.\n"
                 "¿Confirmás que deseás continuar?"
             )
-            if action == "uninstall":
+            if action == "uninstall_selective":
+                warning_text = (
+                    f"ADVERTENCIA: Vas a desinstalar {len(selected_product_ids)} producto(s) "
+                    "seleccionado(s) de Office/Project/Visio en MODO REAL.\n\n"
+                    "¿Confirmás continuar?"
+                )
+            elif action == "uninstall":
                 warning_text = (
                     "ADVERTENCIA CRÍTICA: Vas a desinstalar TODOS los productos de Office/Project/Visio "
                     "detectados y ejecutar limpieza profunda en MODO REAL.\n\n"
@@ -846,8 +974,14 @@ class M365SanitizerDialog(QDialog):
             "label": label,
             "license_mode": str(self.lic_mode_combo.currentData() or "Selectivo"),
             "what_if": what_if,
+            "product_ids": selected_product_ids,
         }
         self.accept()
+
+    def closeEvent(self, event: QCloseEvent) -> None:
+        if self._scan_worker is not None and self._scan_worker.isRunning():
+            self._scan_worker.wait(1500)
+        super().closeEvent(event)
 
     def get_options(self) -> dict[str, Any]:
         """Devuelve la acción y parámetros seleccionados por el operador."""

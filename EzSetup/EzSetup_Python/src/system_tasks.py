@@ -11,6 +11,7 @@ import socket
 import subprocess
 import tempfile
 import threading
+import time
 from typing import Any, Callable
 import winreg
 import zipfile
@@ -1504,6 +1505,179 @@ def install_network_printers(
     return f"Se instalaron/actualizaron {len(normalized_printers)} impresora(s) correctamente."
 
 
+def _decode_console_bytes(data: bytes) -> str:
+    """Decodifica salida de utilidades de consola Windows (cp850 / utf-8 / cp1252)."""
+    if not data:
+        return ""
+    for enc in ("cp850", "utf-8", "cp1252"):
+        try:
+            return data.decode(enc)
+        except UnicodeDecodeError:
+            continue
+    return data.decode("cp850", errors="replace")
+
+
+def diagnose_vpn_endpoint(
+    endpoint_cfg: dict[str, Any],
+    internet_probe_host: str = "1.1.1.1",
+    backup_hint: str = "",
+    log: LogCallback = _noop_log,
+) -> str:
+    """Diagnóstico en 4 capas de un enlace VPN: Internet, DNS, TCP/UDP y tracert -d -h 15."""
+    name = str(endpoint_cfg.get("name", "VPN")).strip()
+    host = str(endpoint_cfg.get("host", "")).strip()
+    expected_ip = str(endpoint_cfg.get("ip", "")).strip()
+    port = int(endpoint_cfg.get("port", 443))
+    protocol = str(endpoint_cfg.get("protocol", "tcp")).strip().lower() or "tcp"
+
+    lines: list[str] = []
+
+    def _emit(line: str) -> None:
+        lines.append(line)
+        log(line)
+
+    _emit(f"=== Diagnóstico VPN: {name} ===")
+    _emit(
+        f"Objetivo: {host or '(sin hostname)'} | IP esperada: {expected_ip} | "
+        f"Puerto {protocol.upper()}: {port}"
+    )
+
+    # Capa 1: Salida a Internet
+    internet_ok = False
+    try:
+        with socket.create_connection((internet_probe_host, 443), timeout=2.5):
+            internet_ok = True
+    except OSError:
+        ping_res = subprocess.run(
+            ["ping", "-n", "1", "-w", "1500", internet_probe_host],
+            capture_output=True,
+            shell=False,
+            creationflags=_CREATE_NO_WINDOW,
+            timeout=5,
+        )
+        internet_ok = ping_res.returncode == 0
+
+    if not internet_ok:
+        _emit(f"[1/4 Internet] FALLO al alcanzar {internet_probe_host}.")
+        _emit("[VEREDICTO] [SIN INTERNET / FALLA ISP O WI-FI]")
+        return "\n".join(lines)
+    _emit(f"[1/4 Internet] OK ({internet_probe_host} accesible).")
+
+    # Capa 2: Resolución DNS
+    if host:
+        try:
+            infos = socket.getaddrinfo(host, port, family=socket.AF_INET, type=socket.SOCK_STREAM)
+            resolved_ips = sorted({str(item[4][0]) for item in infos if item[4]})
+        except OSError as exc:
+            _emit(f"[2/4 DNS] FALLO al resolver '{host}': {exc}")
+            _emit("[VEREDICTO] [FALLA DNS DEL ISP]")
+            return "\n".join(lines)
+
+        if not resolved_ips or expected_ip not in resolved_ips:
+            found = ", ".join(resolved_ips) if resolved_ips else "sin registros A"
+            _emit(f"[2/4 DNS] DISCREPANCIA: '{host}' resolvió [{found}], esperado '{expected_ip}'.")
+            _emit("[VEREDICTO] [FALLA DNS DEL ISP]")
+            return "\n".join(lines)
+        _emit(f"[2/4 DNS] OK: '{host}' -> {expected_ip}.")
+    else:
+        _emit(f"[2/4 DNS] OMITIDO (conexión directa por IP {expected_ip}).")
+
+    # Capa 3: Prueba de puerto (TCP o sonda UDP)
+    verdict = ""
+    if protocol == "udp":
+        udp_sent = False
+        udp_err = ""
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        try:
+            sock.settimeout(2.0)
+            sock.sendto(b"\x00", (expected_ip, port))
+            udp_sent = True
+        except OSError as exc:
+            udp_err = str(exc)
+        finally:
+            sock.close()
+
+        if udp_sent:
+            _emit(
+                f"[3/4 Puerto UDP] Sonda UDP {port} enviada a {expected_ip} "
+                "(sin handshake TCP; se valida alcance mediante tracert)."
+            )
+        else:
+            _emit(f"[3/4 Puerto UDP] FALLO al enviar sonda UDP a {expected_ip}:{port} ({udp_err}).")
+    else:
+        tcp_ok = False
+        tcp_detail = ""
+        t0 = time.monotonic()
+        try:
+            with socket.create_connection((expected_ip, port), timeout=3.0):
+                elapsed_ms = int((time.monotonic() - t0) * 1000)
+                tcp_ok = True
+                tcp_detail = f"puerto {port}/TCP abierto ({elapsed_ms} ms)"
+        except OSError as exc:
+            tcp_detail = f"timeout/error en {expected_ip}:{port} ({exc})"
+
+        if tcp_ok:
+            _emit(f"[3/4 Puerto TCP] OK: {tcp_detail}.")
+            verdict = "[ENLACE REMOTO OPERATIVO — si falla conexión, revisar equipo/adaptador/hora]"
+        else:
+            _emit(f"[3/4 Puerto TCP] FALLO: {tcp_detail}.")
+            verdict = "[ENLACE WAN INACCESIBLE O BLOQUEADO POR ISP]"
+            if backup_hint:
+                verdict = f"{verdict} ({backup_hint})"
+
+    # Capa 4: Trazado tracert -d -h 15
+    _emit(f"[4/4 Tracert] Ejecutando tracert -d -h 15 {expected_ip}...")
+    trace_res = subprocess.run(
+        ["tracert", "-d", "-h", "15", "-w", "1500", expected_ip],
+        capture_output=True,
+        shell=False,
+        creationflags=_CREATE_NO_WINDOW,
+        timeout=60,
+    )
+    trace_lines = [
+        line.rstrip()
+        for line in _decode_console_bytes(trace_res.stdout or b"").splitlines()
+        if line.strip()
+    ]
+    for line in trace_lines:
+        _emit(f"  {line}")
+    for line in _decode_console_bytes(trace_res.stderr or b"").splitlines():
+        if line.strip():
+            _emit(f"  [STDERR] {line.rstrip()}")
+
+    if protocol == "udp":
+        hop_lines = [ln for ln in trace_lines if ln.lstrip().split(" ", 1)[0].isdigit()]
+        reached = any(expected_ip in ln for ln in hop_lines)
+        if reached:
+            verdict = (
+                f"[ENLACE AWS ALCANZABLE (UDP {port}) — si falla conexión, "
+                "revisar certificado/perfil AWS o reloj del equipo]"
+            )
+        else:
+            verdict = f"[ENLACE WAN INACCESIBLE O BLOQUEADO POR ISP] (UDP {port} no alcanzó {expected_ip})"
+
+    _emit(f"[VEREDICTO] {verdict}")
+    return "\n".join(lines)
+
+
+def run_vpn_endpoint_diagnostic(
+    config: AppConfig,
+    endpoint_key: str,
+    log: LogCallback = _noop_log,
+) -> str:
+    """Ejecuta el diagnóstico en 4 capas para un enlace definido en vpn_endpoints."""
+    ep = config.get_vpn_endpoint(endpoint_key)
+    probe = str(config.app.get("internet_probe_host", "1.1.1.1")).strip() or "1.1.1.1"
+    backup_hint = ""
+    if endpoint_key == "forticlient_primary":
+        try:
+            backup = config.get_vpn_endpoint("forticlient_backup")
+            backup_hint = f"Probar {backup['name']}: {backup['host'] or backup['ip']}"
+        except Exception:
+            pass
+    return diagnose_vpn_endpoint(ep, internet_probe_host=probe, backup_hint=backup_hint, log=log)
+
+
 TASK_REGISTRY: dict[str, Callable[[AppConfig, LogCallback], str]] = {
     "fix_eidico_shortcut": fix_eidico_shortcut,
     "set_sol_sistemas_permissions": set_sol_sistemas_permissions,
@@ -1527,4 +1701,13 @@ TASK_REGISTRY: dict[str, Callable[[AppConfig, LogCallback], str]] = {
     "renew_ip_dns": renew_ip_and_dns,
     "open_credential_manager": open_credential_manager,
     "create_network_shortcuts": create_network_shortcuts,
+    "verify_vpn_forticlient_primary": lambda cfg, log: run_vpn_endpoint_diagnostic(
+        cfg, "forticlient_primary", log=log
+    ),
+    "verify_vpn_forticlient_backup": lambda cfg, log: run_vpn_endpoint_diagnostic(
+        cfg, "forticlient_backup", log=log
+    ),
+    "verify_vpn_aws": lambda cfg, log: run_vpn_endpoint_diagnostic(
+        cfg, "aws_vpn", log=log
+    ),
 }

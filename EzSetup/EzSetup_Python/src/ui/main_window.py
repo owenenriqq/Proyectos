@@ -9,7 +9,7 @@ import subprocess
 import sys
 from typing import Any, Callable
 
-from PyQt6.QtCore import QPointF, QSize, Qt, QThread, QTimer
+from PyQt6.QtCore import QPoint, QPointF, QSize, Qt, QThread, QTimer
 from PyQt6.QtGui import (
     QAction,
     QBrush,
@@ -27,8 +27,6 @@ from PyQt6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
-    QListWidget,
-    QListWidgetItem,
     QMainWindow,
     QMenu,
     QMessageBox,
@@ -70,8 +68,8 @@ ActionWidgetSpec = tuple[str, str, str, ActionCallback]
 
 
 def _create_more_dots_icon(color: str = "#E4E4E7") -> QIcon:
-    """Dibuja vectorialmente un ícono de 3 puntos verticales centrado (⋮)."""
-    pixmap = QPixmap(16, 16)
+    """Dibuja vectorialmente un ícono de 3 puntos verticales centrado (12x12)."""
+    pixmap = QPixmap(12, 12)
     pixmap.fill(Qt.GlobalColor.transparent)
 
     painter = QPainter(pixmap)
@@ -79,70 +77,123 @@ def _create_more_dots_icon(color: str = "#E4E4E7") -> QIcon:
     painter.setPen(Qt.PenStyle.NoPen)
     painter.setBrush(QBrush(QColor(color)))
 
-    for y in (3.5, 8.0, 12.5):
-        painter.drawEllipse(QPointF(8.0, y), 1.5, 1.5)
+    for y in (2.5, 6.0, 9.5):
+        painter.drawEllipse(QPointF(6.0, y), 1.15, 1.15)
 
     painter.end()
     return QIcon(pixmap)
 
 
 class ActionRow(QFrame):
-    """Fila horizontal compacta con título, badge opcional, hasta 3 botones y menú ⋮."""
+    """Fila horizontal compacta con título, subtítulo opcional, badge, botón blanco único y menú ⋮."""
 
     def __init__(
         self,
         title: str,
-        visible_actions: list[ActionWidgetSpec],
-        overflow_actions: list[ActionWidgetSpec] | None = None,
+        primary_action: ActionWidgetSpec,
+        secondary_actions: list[ActionWidgetSpec] | None = None,
+        subtitle: str = "",
         badge_text: str = "",
         badge_style: str = "RowBadgeMuted",
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
         self.setObjectName("ActionRow")
-        self.setMinimumHeight(42)
+        self.setMinimumHeight(44)
 
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(14, 6, 14, 6)
-        layout.setSpacing(8)
+        layout.setContentsMargins(14, 7, 14, 7)
+        layout.setSpacing(10)
+
+        left_col = QVBoxLayout()
+        left_col.setContentsMargins(0, 0, 0, 0)
+        left_col.setSpacing(3)
 
         title_lbl = QLabel(title, self)
         title_lbl.setObjectName("RowTitle")
         title_lbl.setWordWrap(True)
         title_lbl.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
-        layout.addWidget(title_lbl, stretch=1)
+        left_col.addWidget(title_lbl)
+
+        if subtitle:
+            subtitle_lbl = QLabel(subtitle, self)
+            subtitle_lbl.setObjectName("RowSubtitle")
+            subtitle_lbl.setWordWrap(True)
+            subtitle_lbl.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+            left_col.addWidget(subtitle_lbl)
+
+        layout.addLayout(left_col, stretch=1)
 
         self.badge_label = QLabel(badge_text, self)
         self.badge_label.setObjectName(badge_style)
+        self.badge_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.badge_label.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         self.badge_label.setVisible(bool(badge_text))
         layout.addWidget(self.badge_label)
 
-        for text, obj_name, tooltip, handler in visible_actions:
-            btn = QPushButton(text, self)
-            if obj_name:
-                btn.setObjectName(obj_name)
-            if tooltip:
-                btn.setToolTip(tooltip)
-            btn.clicked.connect(lambda _checked=False, h=handler: h())
-            layout.addWidget(btn)
+        action_col = QWidget(self)
+        action_col.setObjectName("ActionColumn")
+        action_col.setFixedWidth(168)
+        action_col.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        action_layout = QHBoxLayout(action_col)
+        action_layout.setContentsMargins(0, 0, 0, 0)
+        action_layout.setSpacing(6)
 
-        if overflow_actions:
-            more_btn = QPushButton("", self)
-            more_btn.setObjectName("MoreButton")
-            more_btn.setFixedSize(32, 30)
-            more_btn.setIcon(_create_more_dots_icon())
-            more_btn.setIconSize(QSize(16, 16))
-            more_btn.setToolTip("Más acciones")
-            menu = QMenu(more_btn)
-            for text, _obj_name, tooltip, handler in overflow_actions:
+        p_text, _p_obj_name, p_tooltip, p_handler = primary_action
+
+        self.primary_button = QPushButton(p_text, action_col)
+        self.primary_button.setObjectName("PrimaryButton")
+        self.primary_button.setFixedWidth(140)
+        self.primary_button.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        if p_tooltip:
+            self.primary_button.setToolTip(p_tooltip)
+        self.primary_button.clicked.connect(lambda _checked=False, h=p_handler: h())
+        action_layout.addWidget(self.primary_button)
+
+        self.menu_button: QPushButton | None = None
+        self.more_menu: QMenu | None = None
+        self.menu_spacer: QWidget | None = None
+        if secondary_actions:
+            menu_btn = QPushButton("", action_col)
+            menu_btn.setObjectName("MoreButton")
+            menu_btn.setFixedSize(22, 22)
+            menu_btn.setIcon(_create_more_dots_icon())
+            menu_btn.setIconSize(QSize(12, 12))
+            menu_btn.setToolTip("Más acciones")
+            menu = QMenu(menu_btn)
+            for text, _obj_name, tooltip, handler in secondary_actions:
                 act = QAction(text, menu)
                 if tooltip:
                     act.setToolTip(tooltip)
                 act.triggered.connect(lambda _checked=False, h=handler: h())
                 menu.addAction(act)
-            more_btn.setMenu(menu)
-            layout.addWidget(more_btn)
+            menu_btn.clicked.connect(lambda _checked=False: self._open_more_menu())
+            action_layout.addWidget(menu_btn)
+            self.menu_button = menu_btn
+            self.more_menu = menu
+        else:
+            spacer = QWidget(action_col)
+            spacer.setFixedSize(22, 22)
+            spacer.setStyleSheet("background: transparent;")
+            action_layout.addWidget(spacer)
+            self.menu_spacer = spacer
+
+        layout.addWidget(action_col)
+
+    def _compute_menu_pos(self) -> QPoint:
+        """Calcula la posición global para alinear el borde derecho del QMenu con el botón ⋮."""
+        assert self.menu_button is not None and self.more_menu is not None
+        self.more_menu.ensurePolished()
+        menu_size = self.more_menu.sizeHint()
+        btn_bottom_right = self.menu_button.mapToGlobal(
+            QPoint(self.menu_button.width(), self.menu_button.height() + 4)
+        )
+        return QPoint(max(0, btn_bottom_right.x() - menu_size.width()), btn_bottom_right.y())
+
+    def _open_more_menu(self) -> None:
+        if self.menu_button is None or self.more_menu is None:
+            return
+        self.more_menu.popup(self._compute_menu_pos())
 
     def set_badge(self, text: str, style_name: str, tooltip: str = "") -> None:
         self.badge_label.setText(text)
@@ -157,6 +208,7 @@ class MainWindow(QMainWindow):
     """Ventana principal de EzSetup v3.0.0."""
 
     _LOG_COLLAPSED_HEIGHT = 40
+    _NETWORK_SUBPAGES = ("Adaptadores de Red", "Renovación y Caché", "Diagnóstico de Red")
 
     def __init__(self, config: AppConfig, is_admin: bool) -> None:
         super().__init__()
@@ -174,6 +226,12 @@ class MainWindow(QMainWindow):
         self._category_titles: list[str] = []
         self._network_view: NetworkManagerView | None = None
         self._network_page_index: int = -1
+        self._network_subpage_index: int = 0
+        self._network_submenu_expanded: bool = False
+        self._nav_buttons: list[QPushButton] = []
+        self._network_nav_btn: QPushButton | None = None
+        self._network_submenu: QWidget | None = None
+        self._network_sub_buttons: list[QPushButton] = []
         self._last_selected_row: int = 0
         self._log_collapsed = True
         self._last_log_height: int = 180
@@ -197,6 +255,15 @@ class MainWindow(QMainWindow):
         self.append_log(f"[INFO] Configuración cargada: {self.config.source_path}")
         self.check_servers_now()
         self.check_installed_software_now()
+        QTimer.singleShot(250, self._preload_network_view)
+
+    @property
+    def network_view(self) -> NetworkManagerView | None:
+        return self._network_view
+
+    def _preload_network_view(self) -> None:
+        if self._network_view is not None:
+            self._network_view.ensure_initialized()
 
     # ------------------------------------------------------------------
     # Construcción de UI
@@ -221,10 +288,12 @@ class MainWindow(QMainWindow):
         body_layout.setContentsMargins(0, 0, 0, 0)
         body_layout.setSpacing(0)
 
-        self.sidebar = QListWidget(body)
-        self.sidebar.setObjectName("SidebarNav")
-        self.sidebar.setFixedWidth(220)
-        self.sidebar.currentRowChanged.connect(self._on_sidebar_changed)
+        self.sidebar_panel = QFrame(body)
+        self.sidebar_panel.setObjectName("SidebarPanel")
+        self.sidebar_panel.setFixedWidth(220)
+        self._sidebar_layout = QVBoxLayout(self.sidebar_panel)
+        self._sidebar_layout.setContentsMargins(8, 10, 8, 10)
+        self._sidebar_layout.setSpacing(4)
 
         content_col = QWidget(body)
         content_layout = QVBoxLayout(content_col)
@@ -236,7 +305,7 @@ class MainWindow(QMainWindow):
         self.stack = QStackedWidget(content_col)
         content_layout.addWidget(self.stack, stretch=1)
 
-        body_layout.addWidget(self.sidebar)
+        body_layout.addWidget(self.sidebar_panel)
         body_layout.addWidget(content_col, stretch=1)
 
         self.splitter.addWidget(body)
@@ -265,6 +334,7 @@ class MainWindow(QMainWindow):
         if self.is_admin:
             admin_badge = QLabel("Administrador", bar)
             admin_badge.setObjectName("AdminBadgeOk")
+            admin_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
             layout.addWidget(admin_badge)
         else:
             admin_btn = QPushButton("Sin UAC", bar)
@@ -301,6 +371,7 @@ class MainWindow(QMainWindow):
 
         for server_id, info in self.config.get_servers().items():
             badge = QLabel(f"● {info['host']}", self._top_bar)
+            badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
             badge.setProperty("statusRole", "serverBadge")
             badge.setProperty("statusState", "checking")
             badge.setToolTip(f"{info.get('label', server_id)} — {info.get('unc_root', info['host'])}")
@@ -351,6 +422,7 @@ class MainWindow(QMainWindow):
 
         self.active_task_label = QLabel("", panel)
         self.active_task_label.setObjectName("RowBadgeMuted")
+        self.active_task_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.active_task_label.setVisible(False)
         header.addWidget(self.active_task_label)
 
@@ -450,17 +522,29 @@ class MainWindow(QMainWindow):
     # Construcción dinámica del catálogo desde config.json
     # ------------------------------------------------------------------
 
+    def _clear_sidebar_items(self) -> None:
+        while self._sidebar_layout.count():
+            item = self._sidebar_layout.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.deleteLater()
+        self._nav_buttons.clear()
+        self._network_nav_btn = None
+        self._network_submenu = None
+        self._network_sub_buttons.clear()
+
     def _rebuild_catalog_views(self) -> None:
         previous_row = self._last_selected_row
+        was_net_expanded = self._network_submenu_expanded
+        prev_subpage = self._network_subpage_index
         self.stack.setUpdatesEnabled(False)
-        self.sidebar.blockSignals(True)
         try:
             if self._network_view is not None:
                 self._network_view.shutdown()
                 self._network_view = None
             self._network_page_index = -1
 
-            self.sidebar.clear()
+            self._clear_sidebar_items()
 
             while self.stack.count():
                 widget = self.stack.widget(0)
@@ -483,13 +567,16 @@ class MainWindow(QMainWindow):
             self._search_empty_label.setVisible(False)
             search_layout.addWidget(self._search_empty_label)
 
-            for menu_item in self.config.menus:
-                menu_id = str(menu_item["id"])
+            for idx, menu_item in enumerate(self.config.menus):
                 title = str(menu_item["title"])
 
-                list_item = QListWidgetItem(title)
-                list_item.setData(Qt.ItemDataRole.UserRole, menu_id)
-                self.sidebar.addItem(list_item)
+                nav_btn = QPushButton(title, self.sidebar_panel)
+                nav_btn.setObjectName("NavButton")
+                nav_btn.setCheckable(True)
+                nav_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+                nav_btn.clicked.connect(lambda _c=False, i=idx: self._on_nav_clicked(i))
+                self._sidebar_layout.addWidget(nav_btn)
+                self._nav_buttons.append(nav_btn)
                 self._category_titles.append(title)
 
                 page = self._build_menu_page(
@@ -500,14 +587,56 @@ class MainWindow(QMainWindow):
                 )
                 self.stack.addWidget(page)
 
-            # Vista dedicada integrada de Gestor de Redes
-            net_item = QListWidgetItem("Redes")
-            net_item.setData(Qt.ItemDataRole.UserRole, "network_manager_view")
-            self.sidebar.addItem(net_item)
+            # Vista dedicada integrada de Gestor de Redes con submenú desplegable
+            net_idx = len(self._nav_buttons)
+            net_btn = QPushButton("Redes ▸", self.sidebar_panel)
+            net_btn.setObjectName("NavButton")
+            net_btn.setCheckable(True)
+            net_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            net_btn.clicked.connect(lambda _c=False, i=net_idx: self._on_nav_clicked(i))
+            self._sidebar_layout.addWidget(net_btn)
+            self._nav_buttons.append(net_btn)
+            self._network_nav_btn = net_btn
             self._category_titles.append("Redes")
+
+            submenu = QWidget(self.sidebar_panel)
+            submenu_layout = QVBoxLayout(submenu)
+            submenu_layout.setContentsMargins(0, 2, 0, 2)
+            submenu_layout.setSpacing(2)
+            for sub_idx, sub_title in enumerate(self._NETWORK_SUBPAGES):
+                sub_btn = QPushButton(sub_title, submenu)
+                sub_btn.setObjectName("SubNavButton")
+                sub_btn.setCheckable(True)
+                sub_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+                sub_btn.clicked.connect(lambda _c=False, si=sub_idx: self._on_network_subnav_clicked(si))
+                submenu_layout.addWidget(sub_btn)
+                self._network_sub_buttons.append(sub_btn)
+            submenu.setVisible(False)
+            self._sidebar_layout.addWidget(submenu)
+            self._network_submenu = submenu
+
+            self._sidebar_layout.addStretch(1)
+
+            internet_probe = str(self.config.app.get("internet_probe_host", "1.1.1.1")).strip() or "1.1.1.1"
+            vpn_endpoints = self.config.get_vpn_endpoints()
+            backup_ep = vpn_endpoints.get("forticlient_backup", {})
+            backup_hint = (
+                f"Probar {backup_ep['name']}: {backup_ep.get('host') or backup_ep.get('ip')}"
+                if backup_ep
+                else ""
+            )
             self._network_view = NetworkManagerView(
                 log_callback=self.append_log,
                 on_network_changed=self.check_servers_now,
+                vpn_endpoints=vpn_endpoints,
+                vpn_diagnostic_fn=lambda ep, log, probe=internet_probe, bhint=backup_hint: (
+                    system_tasks.diagnose_vpn_endpoint(
+                        ep,
+                        internet_probe_host=probe,
+                        backup_hint=bhint if ep.get("key") == "forticlient_primary" else "",
+                        log=log,
+                    )
+                ),
                 parent=self.stack,
             )
             self.stack.addWidget(self._network_view)
@@ -516,12 +645,15 @@ class MainWindow(QMainWindow):
             search_layout.addStretch()
             self.stack.addWidget(self._search_page_scroll)
 
-            if self.sidebar.count() > 0:
-                target_row = previous_row if 0 <= previous_row < self.sidebar.count() else 0
-                self.sidebar.setCurrentRow(target_row)
-                self._last_selected_row = target_row
+            if self._nav_buttons:
+                target_row = previous_row if 0 <= previous_row < len(self._nav_buttons) else 0
+                if target_row == self._network_page_index:
+                    self._set_network_submenu_expanded(was_net_expanded)
+                    self._on_network_subnav_clicked(prev_subpage)
+                else:
+                    self._set_network_submenu_expanded(False)
+                    self._on_nav_clicked(target_row)
         finally:
-            self.sidebar.blockSignals(False)
             self.stack.setUpdatesEnabled(True)
 
         self._refresh_dotnet_badge()
@@ -568,7 +700,11 @@ class MainWindow(QMainWindow):
                 )
                 search_row.setVisible(False)
                 search_layout.addWidget(search_row)
-                blob = f"{item.get('title', '')} {category_title} {sub_title}".lower()
+                blob = (
+                    f"{item.get('title', '')} "
+                    f"{item.get('subtitle', '')} "
+                    f"{category_title} {sub_title}"
+                ).lower()
                 self._search_rows_index.append((blob, search_row))
 
             if visible_rows:
@@ -605,6 +741,7 @@ class MainWindow(QMainWindow):
         parent: QWidget | None = None,
     ) -> ActionRow:
         title = str(item["title"])
+        subtitle = str(item.get("subtitle", "")).strip()
         item_id = str(item.get("id", ""))
         actions: list[dict[str, Any]] = list(item.get("actions", []))
 
@@ -616,21 +753,29 @@ class MainWindow(QMainWindow):
             handler = self._make_action_handler(title, act)
             specs.append((label, style, tooltip, handler))
 
-        primary_count = min(3, int(item.get("primary_count", 3)))
-        if len(specs) <= primary_count:
-            visible = specs
-            overflow: list[ActionWidgetSpec] = []
-        else:
-            visible = specs[:primary_count]
-            overflow = specs[primary_count:]
+        if not specs:
+            specs.append((
+                "Abrir",
+                "PrimaryButton",
+                "",
+                lambda t=title: QMessageBox.information(self, t, "Sin acciones configuradas."),
+            ))
+
+        primary_idx = next(
+            (idx for idx, (_lbl, style, _tip, _fn) in enumerate(specs) if style == "PrimaryButton"),
+            0,
+        )
+        primary_action = specs[primary_idx]
+        secondary_actions = [spec for idx, spec in enumerate(specs) if idx != primary_idx]
 
         badge_text = override_badge or str(item.get("badge", ""))
         badge_style = "RowBadgeMuted" if override_badge else str(item.get("badge_style", "RowBadgeMuted"))
 
         row = ActionRow(
             title=title,
-            visible_actions=visible,
-            overflow_actions=overflow,
+            primary_action=primary_action,
+            secondary_actions=secondary_actions,
+            subtitle=subtitle,
             badge_text=badge_text,
             badge_style=badge_style,
             parent=parent,
@@ -824,19 +969,97 @@ class MainWindow(QMainWindow):
     # Buscador sin parpadeo (debounce 150ms) y recarga en caliente
     # ------------------------------------------------------------------
 
-    def _on_sidebar_changed(self, row: int) -> None:
+    def _set_network_submenu_expanded(self, expanded: bool) -> None:
+        self._network_submenu_expanded = expanded
+        if self._network_submenu is not None:
+            self._network_submenu.setVisible(expanded)
+        if self._network_nav_btn is not None:
+            self._network_nav_btn.setText("Redes ▾" if expanded else "Redes ▸")
+
+    def _sync_nav_checked(self, active_idx: int, active_sub_idx: int | None = None) -> None:
+        for i, btn in enumerate(self._nav_buttons):
+            btn.setChecked(i == active_idx)
+        if self._network_nav_btn is not None:
+            submenu_active = (
+                active_idx == self._network_page_index
+                and self._network_submenu_expanded
+                and active_sub_idx is not None
+            )
+            self._network_nav_btn.setProperty("submenuActive", submenu_active)
+            style = self._network_nav_btn.style()
+            if style is not None:
+                style.unpolish(self._network_nav_btn)
+                style.polish(self._network_nav_btn)
+        for j, sub_btn in enumerate(self._network_sub_buttons):
+            sub_btn.setChecked(active_sub_idx is not None and j == active_sub_idx)
+
+    def _on_nav_clicked(self, row: int) -> None:
         if row < 0 or row >= len(self._category_titles):
             return
+        if row == self._network_page_index:
+            next_expanded = not self._network_submenu_expanded
+            self._set_network_submenu_expanded(next_expanded)
+            if next_expanded:
+                self._on_network_subnav_clicked(0)
+            else:
+                self._sync_nav_checked(self._network_page_index, self._network_subpage_index)
+                self._last_selected_row = row
+                self._activate_stack_index(row)
+                sub_title = self._NETWORK_SUBPAGES[self._network_subpage_index]
+                self.section_header_label.setText(f"Redes — {sub_title}")
+            return
+
         self._last_selected_row = row
         self._search_timer.stop()
         if self.search_input.text():
             self.search_input.blockSignals(True)
             self.search_input.clear()
             self.search_input.blockSignals(False)
-        self.stack.setCurrentIndex(row)
+        if self._network_view is not None:
+            self._network_view.set_search_filter("")
+        self._sync_nav_checked(row, None)
+        self._activate_stack_index(row)
         self.section_header_label.setText(self._category_titles[row])
-        if row == self._network_page_index and self._network_view is not None:
+
+    def _on_network_subnav_clicked(self, sub_idx: int) -> None:
+        if sub_idx < 0 or sub_idx >= len(self._NETWORK_SUBPAGES):
+            sub_idx = 0
+        was_other_category = self._last_selected_row != self._network_page_index
+        self._last_selected_row = self._network_page_index
+        self._network_subpage_index = sub_idx
+
+        if was_other_category and self.search_input.text():
+            self.search_input.blockSignals(True)
+            self.search_input.clear()
+            self.search_input.blockSignals(False)
+            if self._network_view is not None:
+                self._network_view.set_search_filter("")
+
+        self._set_network_submenu_expanded(True)
+        self._sync_nav_checked(self._network_page_index, sub_idx)
+        self._activate_stack_index(self._network_page_index)
+        if self._network_view is not None:
             self._network_view.ensure_initialized()
+            self._network_view.set_subpage(sub_idx)
+        sub_title = self._NETWORK_SUBPAGES[sub_idx]
+        if self.search_input.text().strip():
+            self._apply_search_filter()
+        else:
+            self.section_header_label.setText(f"Redes — {sub_title}")
+
+    def _activate_stack_index(self, index: int) -> None:
+        """Actualiza QSizePolicy del QStackedWidget para no heredar altura de otras categorías."""
+        for i in range(self.stack.count()):
+            page = self.stack.widget(i)
+            if page is None:
+                continue
+            if i == index:
+                page.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+            else:
+                page.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Ignored)
+            page.updateGeometry()
+        self.stack.setCurrentIndex(index)
+        self.stack.updateGeometry()
 
     def _on_search_text_edited(self, _text: str) -> None:
         self._search_timer.start()
@@ -847,9 +1070,21 @@ class MainWindow(QMainWindow):
 
         self.stack.setUpdatesEnabled(False)
         try:
+            if (
+                self._last_selected_row == self._network_page_index
+                and self._network_view is not None
+            ):
+                matches = self._network_view.set_search_filter(query)
+                self._activate_stack_index(self._network_page_index)
+                if query:
+                    self.section_header_label.setText(f'Redes — Filtro: "{raw_text}" ({matches})')
+                else:
+                    self.section_header_label.setText(self._category_titles[self._last_selected_row])
+                return
+
             if not query:
                 if 0 <= self._last_selected_row < len(self._category_titles):
-                    self.stack.setCurrentIndex(self._last_selected_row)
+                    self._activate_stack_index(self._last_selected_row)
                     self.section_header_label.setText(self._category_titles[self._last_selected_row])
                 return
 
@@ -864,7 +1099,7 @@ class MainWindow(QMainWindow):
                 self._search_empty_label.setVisible(matches_count == 0)
 
             self.section_header_label.setText(f'Búsqueda: "{raw_text}" ({matches_count})')
-            self.stack.setCurrentWidget(self._search_page_scroll)
+            self._activate_stack_index(self.stack.indexOf(self._search_page_scroll))
         finally:
             self.stack.setUpdatesEnabled(True)
 
@@ -1212,6 +1447,13 @@ class MainWindow(QMainWindow):
 
         if action == "diagnostics":
             self._run_task(label, m365_wrapper.run_office_diagnostics)
+        elif action == "stop_apps":
+            self._run_task(
+                f"{label} ({'Simulación' if what_if else 'Real'})",
+                lambda cfg, log: m365_wrapper.run_stop_office_processes(
+                    cfg, what_if=what_if, log=log
+                ),
+            )
         elif action == "identity":
             self._run_task(
                 f"{label} ({'Simulación' if what_if else 'Real'})",
@@ -1224,6 +1466,14 @@ class MainWindow(QMainWindow):
                 f"{label} ({'Simulación' if what_if else 'Real'})",
                 lambda cfg, log: m365_wrapper.run_reset_office_licenses(
                     cfg, mode=license_mode, what_if=what_if, log=log
+                ),
+            )
+        elif action == "uninstall_selective":
+            product_ids = list(opts.get("product_ids", []))
+            self._run_task(
+                f"{label} ({'Simulación' if what_if else 'Real'})",
+                lambda cfg, log: m365_wrapper.run_uninstall_selected_office_products(
+                    cfg, product_ids=product_ids, what_if=what_if, log=log
                 ),
             )
         elif action == "uninstall":
@@ -1262,11 +1512,11 @@ class MainWindow(QMainWindow):
         dialog.exec()
 
     def _open_network_manager_view(self) -> None:
-        if 0 <= self._network_page_index < self.sidebar.count():
+        if 0 <= self._network_page_index < len(self._nav_buttons):
             if self.search_input.text():
                 self.search_input.clear()
-            self.sidebar.setCurrentRow(self._network_page_index)
-            self._on_sidebar_changed(self._network_page_index)
+            self._set_network_submenu_expanded(True)
+            self._on_network_subnav_clicked(0)
 
     def closeEvent(self, event: QCloseEvent) -> None:
         self._search_timer.stop()

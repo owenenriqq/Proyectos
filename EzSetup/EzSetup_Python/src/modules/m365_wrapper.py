@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 import subprocess
-from typing import Callable
+from typing import Any, Callable
 
 from src.config import AppConfig
 
@@ -177,6 +178,117 @@ def run_reset_office_licenses(
     )
     _run_ps_command(ps_script, log)
     return f"Saneamiento de licencias finalizado ({mode} - {mode_label})."
+
+
+def run_stop_office_processes(
+    _config: AppConfig,
+    what_if: bool = True,
+    log: LogCallback = _noop_log,
+) -> str:
+    """Cierra procesos activos de Office / Project / Visio mediante Stop-OfficeUserApplications."""
+    base_dir = resolve_m365_sanitizer_dir()
+    mod_path = _ps_quote(str(base_dir / "modules" / "Uninstall-OfficeProducts.ps1"))
+    mode_label = "Simulación (-WhatIf)" if what_if else "Ejecución real"
+    log(f"[INFO] Cerrando aplicaciones activas de Office / Project / Visio ({mode_label})...")
+
+    whatif_flag = " -WhatIf" if what_if else ""
+    ps_script = (
+        _build_logger_preamble()
+        + f". '{mod_path}'; "
+        + f"Stop-OfficeUserApplications -Logger $ezLogger -Confirm:$false{whatif_flag} *>&1 | Out-String -Stream"
+    )
+    _run_ps_command(ps_script, log)
+    return f"Cierre de procesos Office finalizado ({mode_label})."
+
+
+def list_installed_office_products(
+    _config: AppConfig | None = None,
+    log: LogCallback = _noop_log,
+) -> list[dict[str, Any]]:
+    """Lista productos Office / Project / Visio instalados (Click-to-Run y MSI)."""
+    base_dir = resolve_m365_sanitizer_dir()
+    mod_path = _ps_quote(str(base_dir / "modules" / "Uninstall-OfficeProducts.ps1"))
+    marker = "__EZ_PRODUCTS_JSON__:"
+
+    ps_script = (
+        _build_logger_preamble()
+        + f". '{mod_path}'; "
+        + "$items = @(Get-InstalledOfficeProducts -Logger $ezLogger); "
+        + "$payload = @(); "
+        + "foreach ($it in $items) { "
+        + "$payload += [PSCustomObject]@{ "
+        + "DisplayName = [string]$it.DisplayName; "
+        + "ProductId = [string]$it.ProductId; "
+        + "Category = [string]$it.Category; "
+        + "InstallType = [string]$it.InstallType; "
+        + "Version = [string]$it.Version "
+        + "} }; "
+        + f"[Console]::Out.WriteLine('{marker}' + ($payload | ConvertTo-Json -Compress)); "
+        + "[Console]::Out.Flush()"
+    )
+    captured_json = "[]"
+
+    def _capture_log(line: str) -> None:
+        nonlocal captured_json
+        if line.startswith(marker):
+            captured_json = line[len(marker):].strip() or "[]"
+        else:
+            log(line)
+
+    _run_ps_command(ps_script, _capture_log)
+    if not captured_json or captured_json == "null":
+        return []
+    parsed = json.loads(captured_json)
+    if isinstance(parsed, dict):
+        return [parsed]
+    if isinstance(parsed, list):
+        return [item for item in parsed if isinstance(item, dict)]
+    return []
+
+
+def run_uninstall_selected_office_products(
+    _config: AppConfig,
+    product_ids: list[str],
+    what_if: bool = True,
+    log: LogCallback = _noop_log,
+) -> str:
+    """Desinstala selectivamente los ProductId seleccionados (C2R o MSI)."""
+    clean_ids = [str(pid).strip() for pid in product_ids if str(pid).strip()]
+    if not clean_ids:
+        raise ValueError("Seleccioná al menos un producto de Office para desinstalar.")
+
+    base_dir = resolve_m365_sanitizer_dir()
+    mod_path = _ps_quote(str(base_dir / "modules" / "Uninstall-OfficeProducts.ps1"))
+    mode_label = "Simulación (-WhatIf)" if what_if else "Ejecución real"
+    whatif_bool = "$true" if what_if else "$false"
+    ids_literal = ", ".join(f"'{_ps_quote(pid)}'" for pid in clean_ids)
+    log(
+        f"[INFO] Iniciando desinstalación selectiva de {len(clean_ids)} producto(s) ({mode_label})..."
+    )
+
+    ps_script = (
+        _build_logger_preamble()
+        + f". '{mod_path}'; "
+        + f"$sim = {whatif_bool}; "
+        + f"$targetIds = @({ids_literal}); "
+        + "$inventory = @(Get-InstalledOfficeProducts -Logger $ezLogger); "
+        + "$selected = @($inventory | Where-Object { $targetIds -contains [string]$_.ProductId }); "
+        + "if ($selected.Count -eq 0) { "
+        + "[Console]::Out.WriteLine('[WARN] Ninguno de los productos seleccionados sigue presente en el sistema.'); "
+        + "[Console]::Out.Flush(); exit 0 }; "
+        + "$installPaths = @(); "
+        + "foreach ($item in $selected) { "
+        + "if ($null -ne $item -and $item.PSObject.Properties['InstallationPath'] -and -not [string]::IsNullOrWhiteSpace([string]$item.InstallationPath)) { "
+        + "$p = ([string]$item.InstallationPath).Trim().TrimEnd('\\'); "
+        + "if ($p -and ($installPaths -notcontains $p)) { $installPaths += $p } } }; "
+        + "Stop-OfficeUserApplications -Logger $ezLogger -Confirm:$false -WhatIf:$sim *>&1 | Out-String -Stream; "
+        + "$c2rExe = Get-OfficeClickToRunExePath -InstallationPaths $installPaths; "
+        + "foreach ($prod in $selected) { "
+        + "[void](Invoke-SingleProductUninstall -Product $prod -ClickToRunExePath $c2rExe -Logger $ezLogger -Confirm:$false -WhatIf:$sim) "
+        + "}"
+    )
+    _run_ps_command(ps_script, log)
+    return f"Desinstalación selectiva finalizada ({len(clean_ids)} producto(s), {mode_label})."
 
 
 def run_uninstall_office_products(

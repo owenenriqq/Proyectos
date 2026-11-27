@@ -8,6 +8,29 @@
     "server_check_interval_ms": 15000,
     "internet_probe_host": "1.1.1.1"
   },
+  "vpn_endpoints": {
+    "forticlient_primary": {
+      "name": "FortiClient Principal",
+      "host": "eidico.fortiddns.com",
+      "ip": "190.220.12.42",
+      "port": 8443,
+      "protocol": "tcp"
+    },
+    "forticlient_backup": {
+      "name": "FortiClient Respaldo",
+      "host": "vpn.eidico.com.ar",
+      "ip": "181.174.193.74",
+      "port": 8443,
+      "protocol": "tcp"
+    },
+    "aws_vpn": {
+      "name": "AWS VPN Client",
+      "host": "",
+      "ip": "18.231.0.41",
+      "port": 443,
+      "protocol": "udp"
+    }
+  },
   "servers": {
     "fileserver_principal": {
       "label": "Fileserver Benavidez",
@@ -238,6 +261,7 @@
             {
               "id": "fox_suite",
               "title": "Sistema de Gestión (Fox)",
+              "subtitle": "Instalador Fox, permisos Sol Sistemas, EIDICO.vbs y EidicoPrueba.exe",
               "badge": "Suite",
               "badge_style": "RowBadgeOk",
               "primary_count": 3,
@@ -296,6 +320,7 @@
             {
               "id": "winscp_com",
               "title": "WinSCP (.NET / COM)",
+              "subtitle": "Instalador WinSCP 5.13.3 y registro de WinSCPnet.dll en .NET v4.0",
               "primary_count": 2,
               "actions": [
                 {
@@ -328,6 +353,7 @@
             {
               "id": "upanel_anura",
               "title": "uPanel Anura 4.4.2",
+              "subtitle": "Cliente de telefonía IP y central Anura para puestos de trabajo",
               "actions": [
                 {
                   "label": "Instalar",
@@ -340,6 +366,7 @@
             {
               "id": "fondos_eidico",
               "title": "Fondos Eidico 4K",
+              "subtitle": "Copia fondos institucionales 4K en la biblioteca Imágenes del usuario",
               "actions": [
                 {
                   "label": "Copiar",
@@ -358,6 +385,7 @@
             {
               "id": "forticlient_vpn",
               "title": "FortiClient VPN",
+              "subtitle": "Cliente VPN corporativo 7.4.3 e importación automática de VPN Config.reg",
               "primary_count": 3,
               "actions": [
                 {
@@ -387,12 +415,25 @@
                   "type": "task",
                   "task": "import_forticlient_reg_lan",
                   "tooltip": "Importar silenciosamente VPN Config.reg desde el paquete ZIP en red"
+                },
+                {
+                  "label": "Verificar Enlace Principal (eidico.fortiddns.com)",
+                  "type": "task",
+                  "task": "verify_vpn_forticlient_primary",
+                  "tooltip": "Diagnóstico en 4 capas (Internet, DNS, Puerto 8443 y Tracert) hacia FortiClient Principal"
+                },
+                {
+                  "label": "Verificar Enlace Respaldo (vpn.eidico.com.ar)",
+                  "type": "task",
+                  "task": "verify_vpn_forticlient_backup",
+                  "tooltip": "Diagnóstico en 4 capas (Internet, DNS, Puerto 8443 y Tracert) hacia FortiClient Respaldo"
                 }
               ]
             },
             {
               "id": "aws_vpn",
               "title": "AWS VPN Client",
+              "subtitle": "Cliente oficial de acceso remoto AWS Client VPN",
               "actions": [
                 {
                   "label": "Descargar",
@@ -405,12 +446,19 @@
                   "style": "PrimaryButton",
                   "type": "msi",
                   "path": "\\\\172.30.0.13\\areas\\0-IT\\AWS_VPN_Client.msi"
+                },
+                {
+                  "label": "Verificar Enlace AWS (18.231.0.41)",
+                  "type": "task",
+                  "task": "verify_vpn_aws",
+                  "tooltip": "Diagnóstico en 4 capas (Internet, UDP 443 y Tracert) hacia AWS VPN Client"
                 }
               ]
             },
             {
               "id": "openvpn",
               "title": "OpenVPN",
+              "subtitle": "Instalador OpenVPN 2.4.6 y copia de certificados y client.ovpn",
               "actions": [
                 {
                   "label": "Copiar Config",
@@ -435,6 +483,7 @@
             {
               "id": "server_credentials",
               "title": "Credenciales de Servidores",
+              "subtitle": "Registra credenciales SMB en Windows Credential Manager (cmdkey)",
               "status_source": "credentials_enc",
               "actions": [
                 {
@@ -449,6 +498,7 @@
             {
               "id": "network_shortcuts",
               "title": "Accesos Directos de Red",
+              "subtitle": "Crea accesos directos .lnk en el Escritorio hacia los fileservers",
               "actions": [
                 {
                   "label": "Crear",
@@ -462,6 +512,7 @@
             {
               "id": "eidico_inventory",
               "title": "Inventario de Equipo",
+              "subtitle": "Releva hardware y SO vía WMI y registra el equipo en Inventario.txt",
               "actions": [
                 {
                   "label": "Abrir",
@@ -480,6 +531,7 @@
             {
               "id": "office_printers",
               "title": "Impresoras de Oficina",
+              "subtitle": "Instala impresoras HP y Ricoh por IP con pnputil o mediante HP-Todas.exe",
               "actions": [
                 {
                   "label": "HP-Todas.exe",
@@ -510,6 +562,7 @@
             {
               "id": "o365_proplus_2021",
               "title": "Office 365 ProPlus 2021",
+              "subtitle": "Montaje automático de imagen IMG y ejecución de Setup64.exe",
               "actions": [
                 {
                   "label": "Instalar",
@@ -523,6 +576,7 @@
             {
               "id": "project_pro_2021",
               "title": "Project Pro 2021",
+              "subtitle": "Montaje automático de imagen IMG y ejecución de Setup64.exe",
               "actions": [
                 {
                   "label": "Instalar",
@@ -536,6 +590,7 @@
             {
               "id": "visio_pro_2021",
               "title": "Visio Pro 2021",
+              "subtitle": "Montaje automático de imagen IMG y ejecución de Setup64.exe",
               "actions": [
                 {
                   "label": "Instalar",
@@ -549,6 +604,7 @@
             {
               "id": "nitro_pdf_13",
               "title": "Nitro PDF Pro",
+              "subtitle": "Instalador MSI desde NitroPDF.zip, acceso a carpeta de red y limpieza",
               "actions": [
                 {
                   "label": "Limpiar",
@@ -581,6 +637,7 @@
             {
               "id": "adobe_cc_2022",
               "title": "Adobe Master Collection 2022",
+              "subtitle": "Suite creativa CC 2022 mediante montaje automático de ISO",
               "actions": [
                 {
                   "label": "Instalar",
@@ -605,6 +662,7 @@
             {
               "id": "autocad_2021",
               "title": "Autodesk AutoCAD 2021",
+              "subtitle": "Montaje de ISO, reglas de Firewall, instructivo y ubicación de red",
               "primary_count": 3,
               "actions": [
                 {
@@ -641,6 +699,7 @@
             {
               "id": "revit_lt_2020",
               "title": "Autodesk Revit LT 2020.1",
+              "subtitle": "Instalador autoextraíble x64 Multilanguage desde repositorio técnico",
               "actions": [
                 {
                   "label": "Instalar",
@@ -690,6 +749,7 @@
             {
               "id": "util_dism",
               "title": "Integridad de Imagen (DISM)",
+              "subtitle": "Reparación y verificación del almacén de componentes de Windows",
               "actions": [
                 {
                   "label": "ScanHealth",
@@ -718,6 +778,7 @@
             {
               "id": "util_sfc",
               "title": "Archivos de Sistema (SFC)",
+              "subtitle": "Verifica y repara archivos protegidos de Windows (sfc /scannow)",
               "actions": [
                 {
                   "label": "SFC /scannow",
@@ -731,6 +792,7 @@
             {
               "id": "util_full_repair",
               "title": "Reparación Completa Automática",
+              "subtitle": "Secuencia guiada: ScanHealth -> RestoreHealth -> SFC -> Cleanup",
               "actions": [
                 {
                   "label": "Ejecutar",
@@ -750,6 +812,7 @@
             {
               "id": "util_hw_diagnostics",
               "title": "Diagnóstico de Hardware y Estabilidad",
+              "subtitle": "Panel de S.M.A.R.T., particiones, batería, RAM/Uptime y BSOD",
               "actions": [
                 {
                   "label": "Batería HTML",
@@ -770,6 +833,7 @@
             {
               "id": "hdsentinel_pro",
               "title": "Hard Disk Sentinel Pro",
+              "subtitle": "Monitoreo S.M.A.R.T. de discos, importación de registro y utilidades",
               "actions": [
                 {
                   "label": "Crack",
@@ -800,6 +864,7 @@
             {
               "id": "util_hibernation",
               "title": "Hibernación e Inicio Rápido",
+              "subtitle": "Administra hiberfil.sys y HiberbootEnabled mediante powercfg",
               "actions": [
                 {
                   "label": "Ver Estado",
@@ -834,6 +899,7 @@
             {
               "id": "util_local_user",
               "title": "Cuentas Locales de Windows",
+              "subtitle": "Crea usuarios locales y asigna membresía al grupo Administradores",
               "actions": [
                 {
                   "label": "Crear Usuario",
@@ -852,6 +918,7 @@
             {
               "id": "util_icon_cache",
               "title": "Caché de Iconos y Registro",
+              "subtitle": "Ajusta Max Cached Icons (4096) y reconstruye la caché de Explorer",
               "actions": [
                 {
                   "label": "Ver Max Icons",
@@ -880,9 +947,10 @@
             {
               "id": "util_appx",
               "title": "Paquetes AppX / Shell",
+              "subtitle": "Verifica MpsSvc y re-registra aplicaciones integradas de Windows",
               "actions": [
                 {
-                  "label": "Re-registrar AppX",
+                  "label": "Re-registrar",
                   "style": "PrimaryButton",
                   "type": "task",
                   "task": "util_reregister_appx",
@@ -894,6 +962,7 @@
             {
               "id": "util_temp_cleanup",
               "title": "Temporales y Windows Update",
+              "subtitle": "Vacía %TEMP%, Windows\\Temp y caché SoftwareDistribution\\Download",
               "actions": [
                 {
                   "label": "Limpiar Temporales",
@@ -903,7 +972,7 @@
                   "tooltip": "Limpiar %TEMP% y C:\\Windows\\Temp omitiendo archivos en uso"
                 },
                 {
-                  "label": "Temporales + WinUpdate",
+                  "label": "Limpiar Todo",
                   "style": "PrimaryButton",
                   "type": "task",
                   "task": "util_clean_temp_wu",
@@ -915,6 +984,7 @@
             {
               "id": "util_print_spooler",
               "title": "Cola de Impresión (Spooler)",
+              "subtitle": "Detiene Spooler, limpia trabajos pendientes en PRINTERS y reinicia",
               "actions": [
                 {
                   "label": "Reiniciar Spooler",
@@ -933,6 +1003,7 @@
             {
               "id": "dotnet_35",
               "title": ".NET Framework 3.5",
+              "subtitle": "Consulta estado en Registro y abre Características de Windows",
               "status_source": "dotnet35",
               "actions": [
                 {
@@ -954,6 +1025,7 @@
             {
               "id": "network_manager",
               "title": "Gestor de Redes",
+              "subtitle": "Acceso directo a adaptadores, renovación IP/DNS y diagnóstico de red",
               "actions": [
                 {
                   "label": "Renovar IP/DNS",
@@ -980,6 +1052,7 @@
             {
               "id": "sanitizer_o365",
               "title": "Sanitizer O365",
+              "subtitle": "Diagnóstico, caché de identidad, licencias y limpieza profunda M365",
               "actions": [
                 {
                   "label": "Ejecutar",
@@ -993,6 +1066,7 @@
             {
               "id": "kms_activation",
               "title": "Activación KMS",
+              "subtitle": "Acceso al instructivo KMS.txt y script externo en red",
               "actions": [
                 {
                   "label": "KMS.txt",
