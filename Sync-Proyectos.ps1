@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Sincroniza de forma segura el repositorio local de Proyectos con GitHub al finalizar la jornada.
 #>
