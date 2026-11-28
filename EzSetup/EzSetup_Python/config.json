@@ -454,6 +454,21 @@
                   "tooltip": "Detener Spooler, vaciar carpeta PRINTERS y reiniciar servicio"
                 }
               ]
+            },
+            {
+              "id": "repair_explorer_taskbar",
+              "title": "Reparar Explorer y Barra de Tareas",
+              "subtitle": "Reinicia Shell/StartMenu, limpia TempState, elimina IrisService y re-registra AppX",
+              "actions": [
+                {
+                  "label": "Reparar",
+                  "style": "PrimaryButton",
+                  "type": "task",
+                  "task": "repair_explorer_taskbar",
+                  "confirm": "¿Reparar Explorer, Menú Inicio y Barra de Tareas?\n\nSe detendrá temporalmente explorer.exe y se re-registrarán los paquetes del Shell.",
+                  "tooltip": "Detener Explorer/StartMenu/SearchHost, limpiar TempState/IrisService y re-registrar paquetes AppX"
+                }
+              ]
             }
           ]
         },

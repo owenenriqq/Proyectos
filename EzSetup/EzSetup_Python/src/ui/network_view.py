@@ -588,10 +588,7 @@ class NetworkManagerView(QWidget):
                     "Renovar",
                     "PrimaryButton",
                     "Renovar concesiones DHCP y caché DNS en todos los adaptadores",
-                    lambda: self._run_network_task(
-                        "Renovar IP y DNS",
-                        lambda log: net_tasks.renew_ip_and_dns(log=log),
-                    ),
+                    self.run_renew_ip_dns,
                 )
             ],
             parent=container,
@@ -919,6 +916,10 @@ class NetworkManagerView(QWidget):
     def run_quick_repair(self) -> None:
         """Ejecuta la secuencia automática de reparación rápida de red sin reiniciar."""
         self._run_network_task("Reparación Rápida", net_tasks.run_quick_repair)
+
+    def run_renew_ip_dns(self) -> None:
+        """Ejecuta la renovación completa de IP y DNS."""
+        self._run_network_task("Renovar IP y DNS", lambda log: net_tasks.renew_ip_and_dns(log=log))
 
     def set_checking_connectivity(self) -> None:
         """Muestra el estado de comprobación en la píldora de conectividad de Redes."""

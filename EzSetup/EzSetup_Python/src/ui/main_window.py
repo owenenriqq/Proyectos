@@ -18,6 +18,8 @@ from PyQt6.QtGui import (
     QIcon,
     QKeySequence,
     QPainter,
+    QPaintEvent,
+    QPen,
     QPixmap,
     QShortcut,
 )
@@ -83,6 +85,38 @@ def _create_more_dots_icon(color: str = "#E4E4E7") -> QIcon:
 
     painter.end()
     return QIcon(pixmap)
+
+
+class _TreeSubmenuContainer(QWidget):
+    """Contenedor de submenú lateral que dibuja conectores de árbol en L (├─ / └─)."""
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._buttons: list[QPushButton] = []
+
+    def set_buttons(self, buttons: list[QPushButton]) -> None:
+        self._buttons = buttons
+        self.update()
+
+    def paintEvent(self, event: QPaintEvent) -> None:
+        super().paintEvent(event)
+        visible_btns = [b for b in self._buttons if b.isVisible()]
+        if not visible_btns:
+            return
+
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, False)
+        painter.setPen(QPen(QColor("#323640"), 1.2))
+
+        trunk_x = 16
+        branch_end_x = 30
+        last_mid_y = visible_btns[-1].geometry().center().y()
+        painter.drawLine(trunk_x, 0, trunk_x, last_mid_y)
+
+        for btn in visible_btns:
+            mid_y = btn.geometry().center().y()
+            painter.drawLine(trunk_x, mid_y, branch_end_x, mid_y)
+        painter.end()
 
 
 class ActionRow(QFrame):
@@ -229,7 +263,7 @@ class MainWindow(QMainWindow):
         self._network_view: NetworkManagerView | None = None
         self._network_page_index: int = -1
         self._network_subpage_index: int = 0
-        self._network_submenu_expanded: bool = False
+        self._network_submenu_expanded: bool = True
         self._nav_buttons: list[QPushButton] = []
         self._quick_access_buttons: list[QPushButton] = []
         self._network_nav_btn: QPushButton | None = None
@@ -239,8 +273,8 @@ class MainWindow(QMainWindow):
         self._log_collapsed = True
         self._last_log_height: int = 180
 
-        self.resize(1080, 650)
-        self.setMinimumSize(900, 540)
+        self.resize(1080, 680)
+        self.setMinimumSize(1040, 620)
 
         icon_path = self.config.get_asset_path("EzSetup.ico")
         if icon_path.is_file():
@@ -293,7 +327,7 @@ class MainWindow(QMainWindow):
 
         self.sidebar_panel = QFrame(body)
         self.sidebar_panel.setObjectName("SidebarPanel")
-        self.sidebar_panel.setFixedWidth(220)
+        self.sidebar_panel.setFixedWidth(245)
         self._sidebar_layout = QVBoxLayout(self.sidebar_panel)
         self._sidebar_layout.setContentsMargins(8, 10, 8, 10)
         self._sidebar_layout.setSpacing(4)
@@ -604,9 +638,9 @@ class MainWindow(QMainWindow):
                 )
                 self.stack.addWidget(page)
 
-            # Vista dedicada integrada de Gestor de Redes con submenú desplegable
+            # Vista dedicada integrada de Gestor de Redes con submenú desplegado por defecto
             net_idx = len(self._nav_buttons)
-            net_btn = QPushButton("Redes ▸", self.sidebar_panel)
+            net_btn = QPushButton("Redes", self.sidebar_panel)
             net_btn.setObjectName("NavButton")
             net_btn.setCheckable(True)
             net_btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -616,9 +650,9 @@ class MainWindow(QMainWindow):
             self._network_nav_btn = net_btn
             self._category_titles.append("Redes")
 
-            submenu = QWidget(self.sidebar_panel)
+            submenu = _TreeSubmenuContainer(self.sidebar_panel)
             submenu_layout = QVBoxLayout(submenu)
-            submenu_layout.setContentsMargins(0, 2, 0, 2)
+            submenu_layout.setContentsMargins(34, 2, 0, 2)
             submenu_layout.setSpacing(2)
             for sub_idx, sub_title in enumerate(self._NETWORK_SUBPAGES):
                 sub_btn = QPushButton(sub_title, submenu)
@@ -628,7 +662,8 @@ class MainWindow(QMainWindow):
                 sub_btn.clicked.connect(lambda _c=False, si=sub_idx: self._on_network_subnav_clicked(si))
                 submenu_layout.addWidget(sub_btn)
                 self._network_sub_buttons.append(sub_btn)
-            submenu.setVisible(False)
+            submenu.set_buttons(self._network_sub_buttons)
+            submenu.setVisible(True)
             self._sidebar_layout.addWidget(submenu)
             self._network_submenu = submenu
 
@@ -669,7 +704,7 @@ class MainWindow(QMainWindow):
                     self._set_network_submenu_expanded(was_net_expanded)
                     self._on_network_subnav_clicked(prev_subpage)
                 else:
-                    self._set_network_submenu_expanded(False)
+                    self._set_network_submenu_expanded(was_net_expanded)
                     self._on_nav_clicked(target_row)
         finally:
             self.stack.setUpdatesEnabled(True)
@@ -691,9 +726,19 @@ class MainWindow(QMainWindow):
 
         quick_specs: list[tuple[str, str, Callable[[], None]]] = [
             (
-                "Reparación Completa",
+                "Reparación Completa Automática",
                 "Ejecutar DISM ScanHealth -> RestoreHealth -> SFC -> Cleanup",
                 lambda: self._trigger_catalog_primary_action("util_full_repair"),
+            ),
+            (
+                "Reparar Explorer y Barra de Tareas",
+                "Reiniciar Shell/StartMenu, limpiar TempState/IrisService y re-registrar AppX",
+                lambda: self._trigger_catalog_primary_action("repair_explorer_taskbar"),
+            ),
+            (
+                "Caché de Iconos y Registro",
+                "Reconstruir caché de iconos y reiniciar explorer.exe",
+                lambda: self._trigger_catalog_primary_action("util_icon_cache"),
             ),
             (
                 "Sanitizer O365",
@@ -706,20 +751,32 @@ class MainWindow(QMainWindow):
                 lambda: self._trigger_catalog_primary_action("kms_activation"),
             ),
             (
-                "Reparación Rápida Red",
+                "Reparación Rápida (Sin reinicio)",
                 "Ejecutar flushdns, release/renew, reinicio de adaptador y conectividad",
                 self._run_network_quick_repair,
             ),
+            (
+                "Renovar IP y DNS (Completo)",
+                "Ejecutar ipconfig /flushdns, /release, /renew y /registerdns",
+                self._run_network_renew_ip_dns,
+            ),
         ]
 
+        qa_container = QWidget(self.sidebar_panel)
+        qa_layout = QVBoxLayout(qa_container)
+        qa_layout.setContentsMargins(0, 0, 0, 0)
+        qa_layout.setSpacing(2)
+
         for label, tip, handler in quick_specs:
-            btn = QPushButton(label, self.sidebar_panel)
+            btn = QPushButton(label, qa_container)
             btn.setObjectName("QuickAccessButton")
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
             btn.setToolTip(tip)
             btn.clicked.connect(lambda _c=False, h=handler: h())
-            self._sidebar_layout.addWidget(btn)
+            qa_layout.addWidget(btn)
             self._quick_access_buttons.append(btn)
+
+        self._sidebar_layout.addWidget(qa_container)
 
     def _trigger_catalog_primary_action(self, item_id: str) -> None:
         rows = self._item_rows_by_id.get(item_id, [])
@@ -735,6 +792,10 @@ class MainWindow(QMainWindow):
     def _run_network_quick_repair(self) -> None:
         if self._network_view is not None:
             self._network_view.run_quick_repair()
+
+    def _run_network_renew_ip_dns(self) -> None:
+        if self._network_view is not None:
+            self._network_view.run_renew_ip_dns()
 
     def _create_scroll_container(self) -> tuple[QScrollArea, QWidget, QVBoxLayout]:
         scroll = QScrollArea(self.stack)
@@ -1052,7 +1113,7 @@ class MainWindow(QMainWindow):
         if self._network_submenu is not None:
             self._network_submenu.setVisible(expanded)
         if self._network_nav_btn is not None:
-            self._network_nav_btn.setText("Redes ▾" if expanded else "Redes ▸")
+            self._network_nav_btn.setText("Redes")
 
     def _sync_nav_checked(self, active_idx: int, active_sub_idx: int | None = None) -> None:
         for i, btn in enumerate(self._nav_buttons):

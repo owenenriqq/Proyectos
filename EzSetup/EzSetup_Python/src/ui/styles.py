@@ -152,7 +152,7 @@ QPushButton#SubNavButton {
     border: none;
     border-left: 3px solid transparent;
     border-radius: 5px;
-    padding: 6px 10px 6px 26px;
+    padding: 6px 10px 6px 10px;
     text-align: left;
     font-size: 12px;
     font-weight: 500;
@@ -190,7 +190,7 @@ QPushButton#QuickAccessButton {
     color: #A1A1AA;
     border: 1px solid transparent;
     border-radius: 5px;
-    padding: 5px 10px;
+    padding: 4px 10px;
     text-align: left;
     font-size: 12px;
     font-weight: 500;

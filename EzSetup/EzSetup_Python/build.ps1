@@ -21,7 +21,7 @@ if (Test-Path (Join-Path $ProjectRoot "dist")) { Remove-Item (Join-Path $Project
 $PyInstallerArgs = @(
     "--noconfirm"
     "--clean"
-    "--onefile"
+    "--onedir"
     "--windowed"
     "--uac-admin"
     "--name", "EzSetup"
@@ -49,11 +49,12 @@ if ($LASTEXITCODE -ne 0) {
     throw "PyInstaller finalizó con código de error $LASTEXITCODE"
 }
 
-Copy-Item -Path (Join-Path $ProjectRoot "config.json") -Destination (Join-Path $ProjectRoot "dist\config.json") -Force
+$DistAppDir = Join-Path $ProjectRoot "dist\EzSetup"
+Copy-Item -Path (Join-Path $ProjectRoot "config.json") -Destination (Join-Path $DistAppDir "config.json") -Force
 foreach ($SubDir in @("Office", "Nitro", "Tecnica", "KMS")) {
-    New-Item -ItemType Directory -Path (Join-Path $ProjectRoot "dist\Recursos\$SubDir") -Force | Out-Null
+    New-Item -ItemType Directory -Path (Join-Path $DistAppDir "Recursos\$SubDir") -Force | Out-Null
 }
 if (Test-Path $CredentialsEnc -PathType Leaf) {
-    Copy-Item -Path $CredentialsEnc -Destination (Join-Path $ProjectRoot "dist\credentials.enc") -Force
+    Copy-Item -Path $CredentialsEnc -Destination (Join-Path $DistAppDir "credentials.enc") -Force
 }
-Write-Host "[OK] Compilación finalizada: dist\EzSetup.exe" -ForegroundColor Green
+Write-Host "[OK] Compilación finalizada: dist\EzSetup\EzSetup.exe" -ForegroundColor Green

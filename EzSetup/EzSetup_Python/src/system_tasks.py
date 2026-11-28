@@ -1060,6 +1060,118 @@ def run_direct_installer(
     return f"Instalador de {label} iniciado."
 
 
+def repair_explorer_taskbar(config: AppConfig, log: LogCallback = _noop_log) -> str:
+    """Repara fallos de Explorer, Menú Inicio y Barra de Tareas limpiando TempState, IrisService y AppX."""
+    processes = (
+        "explorer.exe",
+        "StartMenuExperienceHost.exe",
+        "ShellExperienceHost.exe",
+        "SearchHost.exe",
+    )
+    for proc_name in processes:
+        log(f"[INFO] Deteniendo proceso {proc_name}...")
+        subprocess.run(
+            ["taskkill", "/f", "/im", proc_name],
+            capture_output=True,
+            text=True,
+            shell=False,
+            creationflags=_CREATE_NO_WINDOW,
+        )
+
+    local_app_data = os.environ.get("LOCALAPPDATA", "")
+    if local_app_data:
+        packages_dir = Path(local_app_data) / "Packages"
+        if packages_dir.is_dir():
+            for pattern in (
+                "Microsoft.Windows.StartMenuExperienceHost_*",
+                "Microsoft.Windows.ShellExperienceHost_*",
+            ):
+                for pkg_dir in packages_dir.glob(pattern):
+                    temp_state = pkg_dir / "TempState"
+                    if temp_state.is_dir():
+                        log(f"[INFO] Limpiando TempState: {temp_state}")
+                        shutil.rmtree(temp_state, ignore_errors=True)
+
+    iris_key = r"HKCU\Software\Microsoft\Windows\CurrentVersion\IrisService"
+    query_iris = subprocess.run(
+        ["reg", "query", iris_key],
+        capture_output=True,
+        text=True,
+        shell=False,
+        creationflags=_CREATE_NO_WINDOW,
+    )
+    if query_iris.returncode == 0:
+        log(f"[INFO] Eliminando clave de registro {iris_key}...")
+        del_iris = subprocess.run(
+            ["reg", "delete", iris_key, "/f"],
+            capture_output=True,
+            text=True,
+            shell=False,
+            creationflags=_CREATE_NO_WINDOW,
+        )
+        if del_iris.returncode == 0:
+            log("[OK] Clave IrisService eliminada.")
+        else:
+            log(f"[ADVERTENCIA] No se pudo eliminar IrisService: {(del_iris.stderr or '').strip()}")
+
+    ps_script = "\n".join(
+        [
+            "$ErrorActionPreference = 'SilentlyContinue'",
+            "$pkgs = @(",
+            "    'Microsoft.Windows.ShellExperienceHost',",
+            "    'Microsoft.Windows.StartMenuExperienceHost',",
+            "    'MicrosoftWindows.Client.CBS'",
+            ")",
+            "foreach ($pkgName in $pkgs) {",
+            "    $found = Get-AppxPackage -Name $pkgName",
+            "    foreach ($pkg in $found) {",
+            "        $manifest = Join-Path $pkg.InstallLocation 'AppxManifest.xml'",
+            "        if (Test-Path -LiteralPath $manifest) {",
+            "            Write-Output \"[INFO] Re-registrando $pkgName...\"",
+            "            Add-AppxPackage -DisableDevelopmentMode -Register $manifest",
+            "        }",
+            "    }",
+            "}",
+        ]
+    )
+    with tempfile.TemporaryDirectory(prefix="ezsetup_explorer_") as tmp_dir:
+        tmp_path = register_temp_dir(Path(tmp_dir))
+        try:
+            ps1_path = tmp_path / "repair_explorer.ps1"
+            ps1_path.write_text(ps_script, encoding="utf-8-sig")
+            res = subprocess.run(
+                ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(ps1_path)],
+                capture_output=True,
+                text=True,
+                shell=False,
+                creationflags=_CREATE_NO_WINDOW,
+            )
+            for line in (res.stdout or "").splitlines():
+                if line.strip():
+                    log(line.strip())
+            for line in (res.stderr or "").splitlines():
+                if line.strip():
+                    log(f"[STDERR] {line.strip()}")
+        finally:
+            unregister_temp_dir(tmp_path)
+
+    log("[INFO] Iniciando explorer.exe...")
+    subprocess.Popen(["explorer.exe"], shell=False, close_fds=True)
+    time.sleep(1.0)
+    chk = subprocess.run(
+        ["tasklist", "/fi", "imagename eq explorer.exe"],
+        capture_output=True,
+        text=True,
+        shell=False,
+        creationflags=_CREATE_NO_WINDOW,
+    )
+    if "explorer.exe" in (chk.stdout or "").lower():
+        log("[OK] explorer.exe iniciado y en ejecución.")
+        return "Explorer y Barra de Tareas reparados correctamente."
+    log("[ADVERTENCIA] No se confirmó explorer.exe en tasklist tras el reinicio.")
+    return "Reparación ejecutada; verificá si explorer.exe inició correctamente."
+
+
 def generate_battery_report(config: AppConfig, log: LogCallback = _noop_log) -> str:
     """Genera el reporte de batería de Windows con powercfg y lo abre en el navegador."""
     report_path = config.get_local_path("battery_report_path")
@@ -1730,6 +1842,7 @@ TASK_REGISTRY: dict[str, Callable[[AppConfig, LogCallback], str]] = {
     "apply_autocad_firewall_block": apply_autocad_firewall_block,
     "open_optional_features": open_optional_features,
     "hdsentinel_replace_exe": hdsentinel_replace_exe,
+    "repair_explorer_taskbar": repair_explorer_taskbar,
     "generate_battery_report": generate_battery_report,
     "renew_ip_dns": renew_ip_and_dns,
     "open_credential_manager": open_credential_manager,
