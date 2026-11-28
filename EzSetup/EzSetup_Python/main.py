@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import argparse
 import ctypes
 import os
 import subprocess
@@ -48,8 +49,17 @@ def relaunch_as_admin() -> bool:
     return int(result) > 32
 
 
+def _parse_cli_args(argv: list[str]) -> tuple[argparse.Namespace, list[str]]:
+    parser = argparse.ArgumentParser(add_help=False)
+    parser.add_argument("--config", default=None, help="Ruta a archivo JSON de configuración")
+    parser.add_argument("--profile", default=None, help="Perfil de configuración (ej: eidico)")
+    parser.add_argument("--no-elevate", action="store_true", help="Omitir elevación UAC")
+    return parser.parse_known_args(argv)
+
+
 def main() -> int:
-    skip_uac = "--no-elevate" in sys.argv
+    args, _unknown = _parse_cli_args(sys.argv[1:])
+    skip_uac = bool(args.no_elevate)
     admin = is_user_admin()
 
     if not admin and not skip_uac:
@@ -57,7 +67,7 @@ def main() -> int:
             return 0
 
     try:
-        config = AppConfig.load()
+        config = AppConfig.load(profile=args.profile, config_override=args.config)
     except ConfigError as exc:
         app = QApplication(sys.argv)
         QMessageBox.critical(None, "Error de configuración", str(exc))

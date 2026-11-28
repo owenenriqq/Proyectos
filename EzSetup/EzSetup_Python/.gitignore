@@ -1,1 +1,3 @@
 # Reglas heredadas desde el .gitignore raíz
+config.eidico.json
+Recursos/

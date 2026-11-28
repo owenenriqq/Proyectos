@@ -93,10 +93,12 @@ def _ensure_unc_exists(
         )
     if config is not None:
         validate_unc_host(path_str, config.get_allowed_unc_hosts())
-    path = Path(path_str)
+        path = config.resolve_path(path_str)
+    else:
+        path = Path(os.path.expandvars(path_str.strip()))
     if not path.exists():
         raise FileNotFoundError(
-            f"No se pudo acceder a '{label}' en la ruta configurada: {path_str}"
+            f"No se pudo acceder a '{label}' en la ruta configurada: {path}"
         )
     return path
 
@@ -800,13 +802,39 @@ def copy_openvpn_configs(config: AppConfig, log: LogCallback = _noop_log) -> str
 
 
 def install_nitropdf_lan(config: AppConfig, log: LogCallback = _noop_log) -> str:
-    """Extrae NitroPDF.zip (omitiendo cualquier patch) y lanza el instalador MSI oficial."""
-    zip_path = _ensure_unc_exists(
-        config.get_unc("eidico", "nitropdf_zip"),
-        "NitroPDF.zip",
-        config=config,
-    )
-    msi_name = str(config.get_unc("eidico", "nitropdf_msi_name"))
+    """Instala Nitro PDF Pro desde la carpeta portable Recursos\\Nitro\\ (.zip, .msi o .exe)."""
+    try:
+        nitro_dir = config.get_local_path("nitro_dir")
+    except Exception:
+        nitro_dir = config.resolve_path("Recursos\\Nitro")
+    nitro_dir.mkdir(parents=True, exist_ok=True)
+
+    direct_installers = sorted(
+        p for p in nitro_dir.iterdir()
+        if p.is_file() and p.suffix.lower() in (".msi", ".exe")
+    ) if nitro_dir.is_dir() else []
+
+    if direct_installers:
+        installer = direct_installers[0]
+        log(f"[INFO] Ejecutando instalador Nitro PDF Pro: {installer}")
+        if installer.suffix.lower() == ".msi":
+            _launch_detached("msiexec.exe", ["/i", str(installer)])
+        else:
+            _launch_detached(installer, cwd=installer.parent)
+        return f"Instalador de Nitro PDF iniciado ({installer.name})."
+
+    zip_files = sorted(
+        p for p in nitro_dir.iterdir()
+        if p.is_file() and p.suffix.lower() == ".zip"
+    ) if nitro_dir.is_dir() else []
+
+    if not zip_files:
+        raise FileNotFoundError(
+            f"No se encontró ningún instalador (.msi, .exe o .zip) en {nitro_dir}. "
+            "Copiá el paquete de Nitro PDF Pro en Recursos\\Nitro\\."
+        )
+
+    zip_path = zip_files[0]
     extract_dir = config.get_local_path("nitro_temp_extract_dir")
     extract_dir.mkdir(parents=True, exist_ok=True)
     register_temp_dir(extract_dir)
@@ -820,16 +848,20 @@ def install_nitropdf_lan(config: AppConfig, log: LogCallback = _noop_log) -> str
                 continue
             zf.extract(member, extract_dir)
 
-    msi_path = extract_dir / msi_name
-    if not msi_path.is_file():
-        matches = list(extract_dir.rglob(msi_name))
-        if not matches:
-            raise FileNotFoundError(f"No se encontró {msi_name} dentro de {zip_path}")
-        msi_path = matches[0]
+    msi_matches = sorted(extract_dir.rglob("*.msi"))
+    exe_matches = sorted(extract_dir.rglob("*.exe"))
+    if msi_matches:
+        msi_path = msi_matches[0]
+        log(f"[INFO] Ejecutando instalador MSI: {msi_path}")
+        _launch_detached("msiexec.exe", ["/i", str(msi_path)])
+        return "Instalador de Nitro PDF iniciado."
+    if exe_matches:
+        exe_path = exe_matches[0]
+        log(f"[INFO] Ejecutando instalador EXE: {exe_path}")
+        _launch_detached(exe_path, cwd=exe_path.parent)
+        return "Instalador de Nitro PDF iniciado."
 
-    log(f"[INFO] Ejecutando instalador MSI: {msi_path}")
-    _launch_detached("msiexec.exe", ["/i", str(msi_path)])
-    return "Instalador de Nitro PDF iniciado."
+    raise FileNotFoundError(f"No se encontró instalador .msi o .exe dentro de {zip_path}")
 
 
 def cleanup_nitropdf_temp(config: AppConfig, log: LogCallback = _noop_log) -> str:
@@ -1293,8 +1325,9 @@ def run_generic_explorer(
         )
     if config is not None:
         validate_unc_host(path_str, config.get_allowed_unc_hosts())
-
-    target = Path(path_str)
+        target = config.resolve_path(path_str)
+    else:
+        target = Path(os.path.expandvars(path_str.strip()))
     if target.exists():
         if select and target.is_file():
             log(f"[INFO] Abriendo Explorador seleccionando {target}...")

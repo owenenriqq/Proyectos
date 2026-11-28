@@ -35,12 +35,10 @@ def validate_unc_host(path_str: str, allowed_hosts: set[str]) -> None:
 
 REQUIRED_TOP_KEYS = (
     "app",
-    "servers",
     "local_paths",
     "registry",
     "security",
     "urls",
-    "unc_paths",
     "menus",
 )
 
@@ -52,7 +50,7 @@ REQUIRED_APP_KEYS = (
     "server_check_interval_ms",
 )
 
-REQUIRED_UNC_SECTIONS = ("eidico", "tecnica", "office", "adobe")
+RESOURCE_SUBDIRS = ("Office", "Nitro", "Tecnica", "KMS")
 
 # GUIDs oficiales de carpetas conocidas de Windows (KnownFolders)
 _FOLDERID_DOWNLOADS = "{374DE290-123F-4565-9164-39C4925E467B}"
@@ -117,6 +115,16 @@ def resolve_bundle_root() -> Path:
     return resolve_app_root()
 
 
+def ensure_resources_dirs(app_root: Path | None = None) -> Path:
+    """Crea automáticamente Recursos\\ y sus subcarpetas relativas al directorio base."""
+    base = app_root or resolve_app_root()
+    resources_root = base / "Recursos"
+    resources_root.mkdir(parents=True, exist_ok=True)
+    for subdir in RESOURCE_SUBDIRS:
+        (resources_root / subdir).mkdir(parents=True, exist_ok=True)
+    return resources_root
+
+
 class AppConfig:
     """Contenedor validado e inmutable de la configuración de EzSetup."""
 
@@ -125,28 +133,56 @@ class AppConfig:
         self.source_path = source_path
 
     @classmethod
-    def resolve_config_path(cls) -> Path:
-        """Resuelve config.json: 1) externo junto a EzSetup.exe, 2) _MEIPASS embebido, 3) desarrollo."""
+    def resolve_config_path(
+        cls,
+        profile: str | None = None,
+        config_override: str | Path | None = None,
+    ) -> Path:
+        """Resuelve el archivo de configuración por ruta explícita, perfil (--profile) o config.json."""
+        if config_override is not None and str(config_override).strip():
+            raw_override = Path(os.path.expandvars(str(config_override).strip()))
+            override_candidates = (
+                [raw_override]
+                if raw_override.is_absolute()
+                else [resolve_app_root() / raw_override, raw_override]
+            )
+            for candidate in override_candidates:
+                if candidate.is_file():
+                    return candidate.resolve()
+            searched = ", ".join(str(p) for p in override_candidates)
+            raise ConfigError(f"No se encontró el archivo de configuración especificado: {searched}")
+
+        clean_profile = str(profile or "").strip().lower()
+        filename = f"config.{clean_profile}.json" if clean_profile else "config.json"
+
         candidates: list[Path] = []
         if getattr(sys, "frozen", False):
-            candidates.append(resolve_app_root() / "config.json")
+            candidates.append(resolve_app_root() / filename)
             if hasattr(sys, "_MEIPASS"):
-                candidates.append(resolve_bundle_root() / "config.json")
+                candidates.append(resolve_bundle_root() / filename)
         else:
-            candidates.append(resolve_app_root() / "config.json")
+            candidates.append(resolve_app_root() / filename)
 
         for candidate in candidates:
             if candidate.is_file():
                 return candidate
 
         searched = ", ".join(str(p) for p in candidates)
-        raise ConfigError(f"No se encontró config.json en ninguna ruta esperada: {searched}")
+        raise ConfigError(f"No se encontró {filename} en ninguna ruta esperada: {searched}")
 
     @classmethod
-    def load(cls, config_path: Path | None = None) -> "AppConfig":
-        """Carga y valida config.json priorizando un archivo externo junto al ejecutable."""
+    def load(
+        cls,
+        config_path: Path | None = None,
+        profile: str | None = None,
+        config_override: str | Path | None = None,
+    ) -> "AppConfig":
+        """Carga y valida config.json (o perfil/ruta indicada) priorizando archivo junto al ejecutable."""
         if config_path is None:
-            config_path = cls.resolve_config_path()
+            config_path = cls.resolve_config_path(
+                profile=profile,
+                config_override=config_override,
+            )
 
         if not config_path.is_file():
             raise ConfigError(f"El archivo de configuración no existe: {config_path}")
@@ -160,6 +196,7 @@ class AppConfig:
             raise ConfigError(f"No se pudo leer {config_path}: {exc}") from exc
 
         cls._validate(data, config_path)
+        ensure_resources_dirs()
         return cls(data=data, source_path=config_path)
 
     @staticmethod
@@ -183,13 +220,8 @@ class AppConfig:
             )
 
         unc_section = data.get("unc_paths")
-        if not isinstance(unc_section, dict):
+        if unc_section is not None and not isinstance(unc_section, dict):
             raise ConfigError("La sección 'unc_paths' debe ser un objeto JSON.")
-        missing_unc = [key for key in REQUIRED_UNC_SECTIONS if key not in unc_section]
-        if missing_unc:
-            raise ConfigError(
-                f"Faltan subsecciones en 'unc_paths': {', '.join(missing_unc)}"
-            )
 
         menus = data.get("menus")
         if not isinstance(menus, list) or not menus:
@@ -218,6 +250,19 @@ class AppConfig:
         return self._data["security"]
 
     def get_servers(self) -> dict[str, dict[str, Any]]:
+        if "corporate_servers" in self._data:
+            corp = self._data["corporate_servers"]
+            if isinstance(corp, list):
+                result: dict[str, dict[str, Any]] = {}
+                for idx, entry in enumerate(corp):
+                    if isinstance(entry, dict) and entry.get("host"):
+                        srv_id = str(entry.get("id") or f"server_{idx}")
+                        result[srv_id] = entry
+                return result
+            if isinstance(corp, dict):
+                return corp
+            raise ConfigError("La sección 'corporate_servers' debe ser una lista o un diccionario.")
+
         servers = self._data.get("servers", {})
         if not isinstance(servers, dict):
             raise ConfigError("La sección 'servers' debe ser un diccionario.")
@@ -258,11 +303,20 @@ class AppConfig:
             raise ConfigError(f"La ruta local '{key}' en config.json está vacía.")
         return value
 
+    def resolve_path(self, raw_path: str) -> Path:
+        """Expande variables de entorno y resuelve rutas relativas respecto a resolve_app_root()."""
+        expanded = os.path.expandvars(str(raw_path).strip())
+        if not expanded:
+            return resolve_app_root()
+        candidate = Path(expanded)
+        if not candidate.is_absolute():
+            return resolve_app_root() / candidate
+        return candidate
+
     def get_local_path(self, key: str) -> Path:
-        """Expande variables de entorno de Windows y retorna un Path."""
+        """Expande variables de entorno de Windows y retorna un Path relativo al ejecutable si aplica."""
         raw_value = self.get_local_path_raw(key)
-        expanded = os.path.expandvars(raw_value)
-        return Path(expanded)
+        return self.resolve_path(raw_value)
 
     def get_unc(self, section: str, key: str) -> Any:
         unc_paths = self._data.get("unc_paths", {})
@@ -371,10 +425,25 @@ class AppConfig:
         }
 
     def get_vpn_endpoints(self) -> dict[str, dict[str, Any]]:
-        """Retorna y valida los enlaces VPN configurados en vpn_endpoints."""
-        raw = self._data.get("vpn_endpoints", {})
-        if not isinstance(raw, dict):
-            raise ConfigError("La sección 'vpn_endpoints' en config.json debe ser un objeto.")
+        """Retorna y valida los enlaces VPN configurados en vpn_profiles o vpn_endpoints."""
+        if "vpn_profiles" in self._data:
+            raw_profiles = self._data["vpn_profiles"]
+            if isinstance(raw_profiles, list):
+                if not raw_profiles:
+                    return {}
+                raw: dict[str, Any] = {
+                    str(entry.get("id") or entry.get("key") or f"vpn_{idx}"): entry
+                    for idx, entry in enumerate(raw_profiles)
+                    if isinstance(entry, dict)
+                }
+            elif isinstance(raw_profiles, dict):
+                raw = raw_profiles
+            else:
+                raise ConfigError("La sección 'vpn_profiles' en config.json debe ser una lista o un objeto.")
+        else:
+            raw = self._data.get("vpn_endpoints", {})
+            if not isinstance(raw, dict):
+                raise ConfigError("La sección 'vpn_endpoints' en config.json debe ser un objeto.")
 
         validated: dict[str, dict[str, Any]] = {}
         for key, entry in raw.items():

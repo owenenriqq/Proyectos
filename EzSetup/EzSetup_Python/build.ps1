@@ -50,6 +50,9 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 Copy-Item -Path (Join-Path $ProjectRoot "config.json") -Destination (Join-Path $ProjectRoot "dist\config.json") -Force
+foreach ($SubDir in @("Office", "Nitro", "Tecnica", "KMS")) {
+    New-Item -ItemType Directory -Path (Join-Path $ProjectRoot "dist\Recursos\$SubDir") -Force | Out-Null
+}
 if (Test-Path $CredentialsEnc -PathType Leaf) {
     Copy-Item -Path $CredentialsEnc -Destination (Join-Path $ProjectRoot "dist\credentials.enc") -Force
 }

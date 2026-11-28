@@ -252,14 +252,13 @@ class NetworkManagerView(QWidget):
         root.addWidget(status_frame)
 
         self.pages = QStackedWidget(self)
-        self.pages.addWidget(self._build_adapters_tab())
-        self.pages.addWidget(self._build_renewal_tab())
+        self.pages.addWidget(self._build_adapters_and_cache_tab())
         self.pages.addWidget(self._build_diagnostics_tab())
         self.set_subpage(0)
         root.addWidget(self.pages, stretch=1)
 
     def set_subpage(self, index: int) -> None:
-        """Cambia la subvista activa (0: Adaptadores, 1: Renovación, 2: Diagnóstico)."""
+        """Cambia la subvista activa (0: Adaptadores y Caché, 1: Diagnóstico de Red)."""
         if index < 0 or index >= self.pages.count():
             return
         self.pages.setCurrentIndex(index)
@@ -315,10 +314,10 @@ class NetworkManagerView(QWidget):
         return scroll, container, layout
 
     # ------------------------------------------------------------------
-    # Pestaña 1: Adaptadores de Red
+    # Pestaña 1: Adaptadores y Caché
     # ------------------------------------------------------------------
 
-    def _build_adapters_tab(self) -> QScrollArea:
+    def _build_adapters_and_cache_tab(self) -> QScrollArea:
         scroll, container, layout = self._create_scroll_tab()
 
         header_row = QHBoxLayout()
@@ -375,6 +374,8 @@ class NetworkManagerView(QWidget):
             parent=container,
         )
         layout.addWidget(self._ncpa_row)
+
+        self._append_renewal_sections(container, layout)
         return scroll
 
     def _render_adapters(self, adapters: list[NetworkAdapter]) -> None:
@@ -525,12 +526,8 @@ class NetworkManagerView(QWidget):
 
         return visible_adapters + (1 if ncpa_visible else 0)
 
-    # ------------------------------------------------------------------
-    # Pestaña 2: Renovación y Caché
-    # ------------------------------------------------------------------
-
-    def _build_renewal_tab(self) -> QScrollArea:
-        scroll, container, layout = self._create_scroll_tab()
+    def _append_renewal_sections(self, container: QWidget, layout: QVBoxLayout) -> None:
+        """Agrega las secciones de secuencias automáticas, renovación IP/DNS y pila TCP/IP."""
         self._renewal_sections.clear()
 
         sub_seq = QLabel("SECUENCIAS AUTOMÁTICAS", container)
@@ -545,7 +542,7 @@ class NetworkManagerView(QWidget):
                     "Ejecutar",
                     "PrimaryButton",
                     "Ejecutar secuencia automática de reparación rápida sin reiniciar Windows",
-                    lambda: self._run_network_task("Reparación Rápida", net_tasks.run_quick_repair),
+                    self.run_quick_repair,
                 )
             ],
             parent=container,
@@ -680,10 +677,8 @@ class NetworkManagerView(QWidget):
             )
         )
 
-        return scroll
-
     # ------------------------------------------------------------------
-    # Pestaña 3: Diagnóstico de Red
+    # Pestaña 2: Diagnóstico de Red
     # ------------------------------------------------------------------
 
     def _build_diagnostics_tab(self) -> QScrollArea:
@@ -921,10 +916,22 @@ class NetworkManagerView(QWidget):
             self.adapters_empty_label.setText(f"Error al consultar adaptadores: {err}")
             self.adapters_empty_label.setVisible(True)
 
+    def run_quick_repair(self) -> None:
+        """Ejecuta la secuencia automática de reparación rápida de red sin reiniciar."""
+        self._run_network_task("Reparación Rápida", net_tasks.run_quick_repair)
+
+    def set_checking_connectivity(self) -> None:
+        """Muestra el estado de comprobación en la píldora de conectividad de Redes."""
+        self._set_net_badge("checking", "● Comprobando...")
+
+    def apply_connectivity_result(self, result: dict) -> None:
+        """Actualiza la píldora de conectividad externa con un resultado externo."""
+        self._apply_connectivity_status(result)
+
     def check_connectivity_now(self) -> None:
         if self._connectivity_worker and self._connectivity_worker.isRunning():
             return
-        self._set_net_badge("checking", "● Comprobando...")
+        self.set_checking_connectivity()
         worker = ConnectivityCheckWorker(timeout=2.0)
         worker.status_ready.connect(self._apply_connectivity_status)
         self._connectivity_worker = worker

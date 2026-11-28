@@ -170,6 +170,42 @@ QPushButton#SubNavButton:checked {
     font-weight: 600;
 }
 
+QFrame#SidebarDivider {
+    background-color: #24272E;
+    border: none;
+    max-height: 1px;
+    margin: 4px 4px;
+}
+
+QLabel#SidebarSectionTitle {
+    color: #71717A;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.6px;
+    padding: 2px 8px 2px 8px;
+}
+
+QPushButton#QuickAccessButton {
+    background-color: transparent;
+    color: #A1A1AA;
+    border: 1px solid transparent;
+    border-radius: 5px;
+    padding: 5px 10px;
+    text-align: left;
+    font-size: 12px;
+    font-weight: 500;
+}
+
+QPushButton#QuickAccessButton:hover {
+    background-color: #1F2228;
+    border-color: #2B2F38;
+    color: #F4F4F5;
+}
+
+QPushButton#QuickAccessButton:pressed {
+    background-color: #24272E;
+}
+
 QFrame#NetworkStatusBar {
     background-color: transparent;
     border: none;

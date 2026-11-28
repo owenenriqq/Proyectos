@@ -16,6 +16,11 @@
 ```text
 EzSetup_Python/
 ├── .venv/                              # Entorno virtual Python 3.12 (gitignored)
+├── Recursos/                           # Carpeta portable creada en ejecución (gitignored)
+│   ├── Office/                         # ProPlus2021Retail.img, ProjectPro2021Retail.img, VisioPro2021Retail.img
+│   ├── Nitro/                          # Instalador/paquete de Nitro PDF Pro
+│   ├── Tecnica/                        # Instaladores de AutoCAD 2021 y Revit LT 2020.1
+│   └── KMS/                            # KMS.txt y script .bat de activación
 ├── assets/
 │   ├── EzSetup.ico                     # Ícono oficial
 │   ├── check_dark.png                  # Indicador QCheckBox
@@ -61,22 +66,23 @@ EzSetup_Python/
 - **Fases 1–4 (Integración Monorepo)**: incorporadas en `src/modules/` las suites `Suite-M365-Saneamiento` (`m365_wrapper.py`), `Utilidades` (`utilities/` desacoplado + `CreateLocalUserDialog` / `HardwareDiagnosticsDialog`), `Inventario Eidico` (`inventory_tasks.py` + `InventoryDialog`) y `Gestor-Redes` (`network/` desacoplado + `NetworkManagerView`).
 - **Fase 5 y Portabilidad**: auditoría de `shell=False` y codificación UTF-8, `resolve_config_path()`, streaming directo en M365, colapso real del panel de log en `QSplitter` (`40px`) y soporte de selección individual de servidores + prefijo fijo `eidico\` en `CredentialDialog`.
 
-### Estado Vigente (`v3.0.0`)
+### Estado Vigente (`v3.0.0` — Modo Portable / Neutro)
+- **Portabilidad y Perfiles (`src/config.py`, `main.py`, `src/system_tasks.py`, `config.json`, `config.eidico.json`)**:
+  - **Perfil Neutro por defecto (`config.json`)**: 100% libre de referencias corporativas (`corporate_servers: []`, `vpn_profiles: []`), con rutas relativas a `Recursos\Office\`, `Recursos\Nitro\`, `Recursos\Tecnica\` y `Recursos\KMS\` creadas automáticamente por `ensure_resources_dirs()`.
+  - **Perfil Corporativo (`--profile eidico` o `--config <ruta>`)**: carga `config.eidico.json` (gitignored), habilitando la pestaña **`EIDICO`** al inicio, píldoras de servidores (`172.30.0.13` y `172.31.11.146`) en el header y fila **`Verificar VPN`** en `Diagnóstico de Red`.
 - **UI/UX y Navegación (`src/ui/main_window.py`, `src/ui/styles.py`, `config.json`)**:
-  - Barra lateral `SidebarPanel` con `NavButton` y submenú desplegable **`Redes ▸` / `Redes ▾`** (`SubNavButton`: `Adaptadores de Red`, `Renovación y Caché`, `Diagnóstico de Red`) con indicador lateral único (`submenuActive="true"`, fondo `#181B20` sin `border-left` en el padre cuando un subítem está activo) y `ContentToolbar` con `border-bottom: 1px solid #24272E`.
-  - `ActionRow` con subtítulos descriptivos (`RowSubtitle` `#A8A8B3`, `12px`), `PrimaryButton` azul sobrio (`#2B5B9E`, borde `#366CB8`, texto `#F8FAFC`, hover `#356DB3`, pressed `#234B84`) de ancho fijo `140px` dentro de `ActionColumn` (`168px`), y botón `⋮` (`MoreButton` `22x22 px`, `border-radius: 5px`, ícono `12x12 px`) con `QMenu` oscuro alineado al borde derecho (o espaciador `22x22 px` en filas de 1 acción).
+  - Barra lateral compacta con 3 categorías raíz: **`Instaladores`** (inicio por defecto), **`Reparaciones y Diagnóstico`** y **`Redes ▾`** (`Adaptadores y Caché`, `Diagnóstico de Red`), más sección inferior **`ACCESOS RÁPIDOS`** (`Reparación Completa`, `Sanitizer O365`, `Activación KMS`, `Reparación Rápida Red`). Categorías ausentes o con `"enabled": false` (como `EIDICO`) no se renderizan.
+  - Header sin píldoras IP cuando `corporate_servers` está vacío (conserva indicador `Administrador`/`Sin UAC` y botón `Verificar Red`, que en modo neutro ejecuta verificación de salida a Internet y DNS actualizando la píldora de `Redes` y la barra inferior).
+  - **Instaladores**: subgrupo **`OFIMÁTICA`** (Office 2021 ProPlus, Project Pro 2021 y Visio Pro 2021 desde `Recursos\Office\` con `Descargar IMG oficial` en `⋮` hacia `Recursos\Office\`, más Nitro PDF Pro desde `Recursos\Nitro\`) y subgrupo **`CAD Y BIM`** (AutoCAD 2021 y Revit LT 2020.1 desde `Recursos\Tecnica\`).
+  - **Reparaciones y Diagnóstico**: sin `.NET Framework 3.5`, `Gestor de Redes` ni `Hard Disk Sentinel Pro`; `Activación KMS` apuntando a `Recursos\KMS\`.
 - **Vista Redes (`src/ui/network_view.py`)**:
-  - `NetworkManagerView` montada directo en `MainWindow.stack` (sin `QTabBar` ni doble scroll) con `QStackedWidget` interno (`set_subpage`), barra `NetworkStatusBar` (`border-bottom: 1px solid #24272E`), precarga en segundo plano (`QTimer.singleShot(250, ...)`), `QSizePolicy` dinámico sin espacio vacío en `Adaptadores de Red`/`Renovación y Caché`, filtro **`Solo conectados`** activado por defecto, buscador contextual `Ctrl+F` y badges centrados (`AlignCenter` + `AlignVCenter`, `padding: 3px 10px`).
-- **Diagnóstico VPN en 4 Capas (`config.json`, `src/config.py`, `src/system_tasks.py`)**:
-  - `vpn_endpoints` validados (`forticlient_primary` `tcp:8443`, `forticlient_backup` `tcp:8443`, `aws_vpn` `udp:443`) y `diagnose_vpn_endpoint()` (Internet `1.1.1.1` → DNS → TCP `3s` o sonda UDP + alcance `tracert -d -h 15`), accesible desde `EIDICO` (`⋮`) y `Redes > Diagnóstico de Red`.
+  - `NetworkManagerView` montada directo en `MainWindow.stack` con 2 subvistas: **`Adaptadores y Caché`** (interfaces detectadas con `Solo conectados` activo por defecto + `ncpa.cpl` + secuencias automáticas, renovación IP/DNS y reparación TCP/IP) y **`Diagnóstico de Red`** (pruebas activas + tablas del sistema + salida amplia; barra `Verificar VPN` oculta cuando `vpn_profiles` está vacío). `src/modules/network/` libre de referencias corporativas.
 - **Suite-M365-Saneamiento (`src/modules/m365_wrapper.py`, `src/ui/dialogs.py`)**:
-  - `M365SanitizerDialog` (`580px`, sin scroll horizontal) con 6 opciones: diagnóstico, cierre de procesos (`Stop-OfficeUserApplications`), limpieza de identidad, licencias (`Selectivo`/`Total`), desinstalación selectiva por producto (`Get-InstalledOfficeProducts`) y desinstalación total, con `-WhatIf` por defecto y confirmación previa.
+  - `M365SanitizerDialog` (`580px`, sin scroll horizontal) con 6 opciones, `-WhatIf` por defecto y confirmación previa.
 
 ---
 
 ## 4. Próximos Pasos
 
-1. Completar en `config.json` las rutas UNC faltantes en `unc_paths.tecnica` (`revit_2021_iso`, `dwg_trueview_2020_installer`, `sketchup_installer`).
-2. Compilar `dist\EzSetup.exe` manualmente con `powershell -ExecutionPolicy Bypass -File build.ps1`.
-3. Validar en vivo contra `172.30.0.13`, `172.31.11.146` y `fileserver2025` (impresoras IP, M365 Sanitizer real, Inventario, Diagnóstico VPN y Gestor de Redes).
-4. Probar `dist\EzSetup.exe` en un equipo Windows 10/11 limpio desde pendrive.
+1. Compilar `dist\EzSetup.exe` manualmente cuando se requiera con `powershell -ExecutionPolicy Bypass -File build.ps1`.
+2. Probar `dist\EzSetup.exe` en un equipo Windows 10/11 limpio desde pendrive verificando la descarga de los `.img` de Office en `Recursos\Office\`.

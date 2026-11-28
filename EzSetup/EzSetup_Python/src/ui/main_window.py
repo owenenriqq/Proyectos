@@ -41,8 +41,9 @@ from PyQt6.QtWidgets import (
 )
 
 from src import system_tasks
-from src.config import AppConfig, ConfigError
+from src.config import AppConfig, ConfigError, ensure_resources_dirs
 from src.modules import m365_wrapper, utilities_tasks
+from src.modules.network.network_workers import ConnectivityCheckWorker
 from src.ui.dialogs import (
     CreateLocalUserDialog,
     CredentialDialog,
@@ -208,7 +209,7 @@ class MainWindow(QMainWindow):
     """Ventana principal de EzSetup v3.0.0."""
 
     _LOG_COLLAPSED_HEIGHT = 40
-    _NETWORK_SUBPAGES = ("Adaptadores de Red", "Renovación y Caché", "Diagnóstico de Red")
+    _NETWORK_SUBPAGES = ("Adaptadores y Caché", "Diagnóstico de Red")
 
     def __init__(self, config: AppConfig, is_admin: bool) -> None:
         super().__init__()
@@ -217,6 +218,7 @@ class MainWindow(QMainWindow):
         self._active_workers: list[QThread] = []
         self._server_badges: dict[str, QLabel] = {}
         self._server_check_worker: ServerCheckWorker | None = None
+        self._connectivity_check_worker: ConnectivityCheckWorker | None = None
         self._install_check_worker: InstalledSoftwareCheckWorker | None = None
         self._dotnet_rows: list[ActionRow] = []
         self._creds_rows: list[ActionRow] = []
@@ -229,6 +231,7 @@ class MainWindow(QMainWindow):
         self._network_subpage_index: int = 0
         self._network_submenu_expanded: bool = False
         self._nav_buttons: list[QPushButton] = []
+        self._quick_access_buttons: list[QPushButton] = []
         self._network_nav_btn: QPushButton | None = None
         self._network_submenu: QWidget | None = None
         self._network_sub_buttons: list[QPushButton] = []
@@ -369,7 +372,8 @@ class MainWindow(QMainWindow):
                 widget.deleteLater()
         self._server_badges.clear()
 
-        for server_id, info in self.config.get_servers().items():
+        servers = self.config.get_servers()
+        for server_id, info in servers.items():
             badge = QLabel(f"● {info['host']}", self._top_bar)
             badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
             badge.setProperty("statusRole", "serverBadge")
@@ -377,6 +381,13 @@ class MainWindow(QMainWindow):
             badge.setToolTip(f"{info.get('label', server_id)} — {info.get('unc_root', info['host'])}")
             self._server_badges[server_id] = badge
             self.server_badges_layout.addWidget(badge)
+
+        if servers:
+            self.refresh_net_btn.setToolTip(
+                "Comprobar conectividad TCP/SMB con los servidores configurados"
+            )
+        else:
+            self.refresh_net_btn.setToolTip("Verificar salida a Internet y resolución DNS")
 
     def _create_content_toolbar(self, parent: QWidget) -> QFrame:
         toolbar = QFrame(parent)
@@ -529,6 +540,7 @@ class MainWindow(QMainWindow):
             if widget is not None:
                 widget.deleteLater()
         self._nav_buttons.clear()
+        self._quick_access_buttons.clear()
         self._network_nav_btn = None
         self._network_submenu = None
         self._network_sub_buttons.clear()
@@ -567,7 +579,12 @@ class MainWindow(QMainWindow):
             self._search_empty_label.setVisible(False)
             search_layout.addWidget(self._search_empty_label)
 
-            for idx, menu_item in enumerate(self.config.menus):
+            active_menus = [
+                menu_item
+                for menu_item in self.config.menus
+                if menu_item.get("enabled", True) is not False
+            ]
+            for idx, menu_item in enumerate(active_menus):
                 title = str(menu_item["title"])
 
                 nav_btn = QPushButton(title, self.sidebar_panel)
@@ -616,6 +633,7 @@ class MainWindow(QMainWindow):
             self._network_submenu = submenu
 
             self._sidebar_layout.addStretch(1)
+            self._build_quick_access_section()
 
             internet_probe = str(self.config.app.get("internet_probe_host", "1.1.1.1")).strip() or "1.1.1.1"
             vpn_endpoints = self.config.get_vpn_endpoints()
@@ -659,6 +677,64 @@ class MainWindow(QMainWindow):
         self._refresh_dotnet_badge()
         self._refresh_creds_badge()
         self._apply_search_filter()
+
+    def _build_quick_access_section(self) -> None:
+        """Agrega la sección ACCESOS RÁPIDOS en la parte inferior del panel lateral."""
+        divider = QFrame(self.sidebar_panel)
+        divider.setObjectName("SidebarDivider")
+        divider.setFixedHeight(1)
+        self._sidebar_layout.addWidget(divider)
+
+        header = QLabel("ACCESOS RÁPIDOS", self.sidebar_panel)
+        header.setObjectName("SidebarSectionTitle")
+        self._sidebar_layout.addWidget(header)
+
+        quick_specs: list[tuple[str, str, Callable[[], None]]] = [
+            (
+                "Reparación Completa",
+                "Ejecutar DISM ScanHealth -> RestoreHealth -> SFC -> Cleanup",
+                lambda: self._trigger_catalog_primary_action("util_full_repair"),
+            ),
+            (
+                "Sanitizer O365",
+                "Abrir asistente Suite-M365-Saneamiento",
+                self._open_m365_sanitizer_dialog,
+            ),
+            (
+                "Activación KMS",
+                "Ejecutar script de activación KMS del perfil activo",
+                lambda: self._trigger_catalog_primary_action("kms_activation"),
+            ),
+            (
+                "Reparación Rápida Red",
+                "Ejecutar flushdns, release/renew, reinicio de adaptador y conectividad",
+                self._run_network_quick_repair,
+            ),
+        ]
+
+        for label, tip, handler in quick_specs:
+            btn = QPushButton(label, self.sidebar_panel)
+            btn.setObjectName("QuickAccessButton")
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn.setToolTip(tip)
+            btn.clicked.connect(lambda _c=False, h=handler: h())
+            self._sidebar_layout.addWidget(btn)
+            self._quick_access_buttons.append(btn)
+
+    def _trigger_catalog_primary_action(self, item_id: str) -> None:
+        rows = self._item_rows_by_id.get(item_id, [])
+        if rows:
+            rows[0].primary_button.click()
+            return
+        QMessageBox.information(
+            self,
+            "Acceso Rápido",
+            f"La herramienta '{item_id}' no está disponible en el perfil actual.",
+        )
+
+    def _run_network_quick_repair(self) -> None:
+        if self._network_view is not None:
+            self._network_view.run_quick_repair()
 
     def _create_scroll_container(self) -> tuple[QScrollArea, QWidget, QVBoxLayout]:
         scroll = QScrollArea(self.stack)
@@ -914,9 +990,10 @@ class MainWindow(QMainWindow):
             url_key = str(act.get("url_key", "")).strip()
             direct_url = str(act.get("url", "")).strip()
             direct_filename = str(act.get("filename", "")).strip()
+            direct_dest_dir = str(act.get("dest_dir", "")).strip()
             import_reg = bool(act.get("import_embedded_reg", False))
             install_msi = bool(act.get("install_embedded_msi", False))
-            return lambda uk=url_key, du=direct_url, df=direct_filename, t=item_title, ir=import_reg, im=install_msi: (
+            return lambda uk=url_key, du=direct_url, df=direct_filename, dd=direct_dest_dir, t=item_title, ir=import_reg, im=install_msi: (
                 self._start_download(
                     url_key=uk,
                     label=t,
@@ -924,6 +1001,7 @@ class MainWindow(QMainWindow):
                     install_embedded_msi=im,
                     direct_url=du,
                     direct_filename=df,
+                    direct_dest_dir=dd,
                 )
             )
 
@@ -1105,7 +1183,7 @@ class MainWindow(QMainWindow):
 
     def _reload_config(self) -> None:
         try:
-            new_cfg = AppConfig.load()
+            new_cfg = AppConfig.load(config_path=self.config.source_path)
         except ConfigError as exc:
             QMessageBox.warning(self, "Error al recargar config.json", str(exc))
             self.append_log(f"[ERROR] Falló recarga de config.json: {exc}")
@@ -1133,14 +1211,40 @@ class MainWindow(QMainWindow):
         self._server_timer.start()
 
     def check_servers_now(self) -> None:
+        servers = self.config.get_servers()
+        if not servers:
+            if self._connectivity_check_worker and self._connectivity_check_worker.isRunning():
+                return
+            self.refresh_net_btn.setEnabled(False)
+            if self._network_view is not None:
+                self._network_view.set_checking_connectivity()
+            worker = ConnectivityCheckWorker(timeout=2.0)
+            worker.status_ready.connect(self._on_neutral_connectivity_status)
+            worker.finished.connect(lambda: self.refresh_net_btn.setEnabled(True))
+            self._connectivity_check_worker = worker
+            worker.start()
+            return
+
         if self._server_check_worker and self._server_check_worker.isRunning():
             return
         self.refresh_net_btn.setEnabled(False)
-        worker = ServerCheckWorker(self.config.get_servers())
+        worker = ServerCheckWorker(servers)
         worker.status_ready.connect(self._on_server_status)
         worker.finished.connect(lambda: self.refresh_net_btn.setEnabled(True))
         self._server_check_worker = worker
         worker.start()
+
+    def _on_neutral_connectivity_status(self, result: dict[str, Any]) -> None:
+        if self._network_view is not None:
+            self._network_view.apply_connectivity_result(result)
+        if result.get("online"):
+            latency = result.get("latency_ms")
+            host = str(result.get("host") or "1.1.1.1")
+            dns_txt = "DNS OK" if result.get("dns_ok") else "Sin DNS"
+            lat_txt = f"{latency} ms" if latency is not None else "OK"
+            self.append_log(f"[OK] Red verificada: Internet OK ({host}, {lat_txt}) · {dns_txt}")
+        else:
+            self.append_log("[ADVERTENCIA] Red verificada: Sin conexión externa a Internet.")
 
     def _on_server_status(self, results: dict[str, bool]) -> None:
         servers = self.config.get_servers()
@@ -1289,13 +1393,20 @@ class MainWindow(QMainWindow):
         install_embedded_msi: bool = False,
         direct_url: str = "",
         direct_filename: str = "",
+        direct_dest_dir: str = "",
     ) -> None:
         if url_key:
             info = self.config.get_url_info(url_key)
         else:
             info = {"url": direct_url, "filename": direct_filename, "open_after_download": True}
 
-        dest_dir = self.config.get_downloads_dir()
+        ensure_resources_dirs()
+        raw_dest_dir = str(direct_dest_dir or info.get("dest_dir", "")).strip()
+        if raw_dest_dir:
+            dest_dir = self.config.resolve_path(raw_dest_dir)
+            dest_dir.mkdir(parents=True, exist_ok=True)
+        else:
+            dest_dir = self.config.get_downloads_dir()
         chunk_size = int(self.config.app.get("copy_chunk_size_bytes", 65536))
         embedded_msi = info.get("embedded_msi_name") if install_embedded_msi else None
         embedded_reg = info.get("embedded_reg_name") if import_embedded_reg else None
@@ -1390,8 +1501,9 @@ class MainWindow(QMainWindow):
         )
 
     def _mount_and_install(self, image_path: str, setup_rel: str, label: str) -> None:
+        resolved_image = str(self.config.resolve_path(image_path)) if image_path.strip() else ""
         worker = IsoMountWorker(
-            image_path=image_path,
+            image_path=resolved_image,
             setup_relative_path=setup_rel,
             label=label,
             allowed_hosts=self.config.get_allowed_unc_hosts(),
@@ -1526,6 +1638,8 @@ class MainWindow(QMainWindow):
             self._network_view.shutdown()
         if self._server_check_worker and self._server_check_worker.isRunning():
             self._server_check_worker.wait(1500)
+        if self._connectivity_check_worker and self._connectivity_check_worker.isRunning():
+            self._connectivity_check_worker.wait(1500)
         if self._install_check_worker and self._install_check_worker.isRunning():
             self._install_check_worker.wait(1500)
         for worker in list(self._active_workers):
